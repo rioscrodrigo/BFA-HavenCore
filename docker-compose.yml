@@ -39,6 +39,56 @@ services:
       - ./docker/db-import.sh:/db-import.sh:ro
     entrypoint: ["bash", "/db-import.sh"]
 
+  # EN: Fast C++ iteration loop. Unlike the "worldserver"/"bnetserver"
+  # image builds (which rebuild from scratch every time in this Docker
+  # Desktop setup, since BuildKit cache mounts don't survive between
+  # separate `docker compose build` runs here), this bind-mounts the repo
+  # and a *real* named volume (dev_build_cache, not a cache mount) for
+  # /build, so ninja does genuine incremental compiles. Use this to
+  # quickly check that a code change compiles; run
+  # `docker compose build worldserver bnetserver` afterwards (slower) only
+  # when you actually want to test it in a running container.
+  #   docker compose run --rm dev-builder
+  # ES: Loop rapido de iteracion en C++. A diferencia de las imagenes de
+  # "worldserver"/"bnetserver" (que en este Docker Desktop se reconstruyen
+  # de cero cada vez, porque los cache mounts de BuildKit no sobreviven
+  # entre corridas separadas de `docker compose build`), esto monta el
+  # repo y un volumen nombrado *real* (dev_build_cache, no un cache mount)
+  # para /build, asi que ninja hace compilacion incremental de verdad. Usa
+  # esto para validar rapido que un cambio de codigo compila; corre
+  # `docker compose build worldserver bnetserver` despues (mas lento) solo
+  # cuando quieras probarlo de verdad en un contenedor corriendo.
+  #   docker compose run --rm dev-builder
+  dev-builder:
+    container_name: bfacore-dev-builder
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.dev-builder
+    profiles: ["tools"]
+    volumes:
+      - .:/src
+      - dev_build_cache:/build
+      # EN: Install output, shared with worldserver/bnetserver ONLY when
+      # started via docker-compose.dev.yml (see that file / docker/README.md).
+      # ES: Salida de la instalacion, compartida con worldserver/bnetserver
+      # SOLO cuando se arrancan via docker-compose.dev.yml (ver ese archivo
+      # / docker/README.md).
+      - dev_install:/opt/bfacore
+    working_dir: /src
+    command:
+      - bash
+      - -c
+      - |
+        set -e
+        cmake -S /src -B /build -G Ninja \
+          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+          -DTOOLS=0 \
+          -DSCRIPTS=static \
+          -DWITHOUT_GIT=1 \
+          -DCMAKE_INSTALL_PREFIX=/opt/bfacore
+        cmake --build /build -j"$(nproc)"
+        cmake --build /build --target install
+
   bnetserver:
     container_name: bfacore-bnetserver
     build:
@@ -107,3 +157,5 @@ volumes:
   mysql_data:
   bnetserver_etc:
   worldserver_etc:
+  dev_build_cache:
+  dev_install:

@@ -1,0 +1,49 @@
+# EN: Fast dev-loop override. Makes worldserver/bnetserver run the
+# binaries compiled by "dev-builder" (real persistent volume, genuine
+# incremental ninja builds) instead of building their own multi-stage
+# image (whose BuildKit cache mount doesn't survive between separate
+# `docker compose build` runs on this Docker Desktop -- see
+# docker/README.md). Does NOT replace docker-compose.yml: a fresh clone
+# still works with plain `docker compose up` using the self-contained
+# multi-stage build. Use this file ONLY while actively iterating on C++
+# code:
+#
+#   docker compose build dev-builder            # once
+#   docker compose run --rm dev-builder          # after every code change
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+#     up -d --build worldserver bnetserver       # picks up dev_install
+#
+# ES: Override para el loop rapido de desarrollo. Hace que
+# worldserver/bnetserver corran los binarios que compilo "dev-builder"
+# (volumen persistente real, builds incrementales de ninja de verdad) en
+# vez de construir su propia imagen multi-stage (cuyo cache mount de
+# BuildKit no sobrevive entre corridas separadas de `docker compose build`
+# en este Docker Desktop -- ver docker/README.md). NO reemplaza a
+# docker-compose.yml: un clone nuevo del repo sigue andando con
+# `docker compose up` a secas, usando el build multi-stage autocontenido.
+# Usa este archivo SOLO mientras estas iterando activamente sobre codigo
+# C++:
+#
+#   docker compose build dev-builder            # una vez
+#   docker compose run --rm dev-builder          # despues de cada cambio
+#   docker compose -f docker-compose.yml -f docker-compose.dev.yml \
+#     up -d --build worldserver bnetserver       # toma el dev_install
+services:
+  bnetserver:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.runtime
+    entrypoint: ["/entrypoint.sh", "bnetserver"]
+    volumes:
+      - dev_install:/opt/bfacore
+      - bnetserver_etc:/opt/bfacore/etc
+
+  worldserver:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.runtime
+    entrypoint: ["/entrypoint.sh", "worldserver"]
+    volumes:
+      - dev_install:/opt/bfacore
+      - worldserver_etc:/opt/bfacore/etc
+      - ./client-data:/opt/bfacore/bin/ClientData:ro

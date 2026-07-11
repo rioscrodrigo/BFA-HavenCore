@@ -17,6 +17,7 @@
 
 #include "Creature.h"
 #include "GameObject.h"
+#include "LootMgr.h"
 #include "MotionMaster.h"
 #include "ObjectAccessor.h"
 #include "Player.h"
@@ -43,6 +44,7 @@ enum MardumQuests
     QUEST_EYE_ON_THE_PRIZE = 39049,
     QUEST_MEETING_WITH_QUEEN = 39050,
     QUEST_SHIVARRA_FORCES = 38765,
+    QUEST_SEVIS_SACRIFICED = 40087,
     QUEST_BEFORE_OVERRUN = 38766,
     QUEST_HIDDEN_NO_MORE = 39495,
     QUEST_ON_FELBAT_WINGS = 39663,
@@ -648,17 +650,43 @@ struct npc_doom_commander_beliash : public ScriptedAI
 };
 
 // 99915 - Sevis Brightflame
-struct npc_mardum_sevis_brightflame_shivarra : public ScriptedAI
+class npc_mardum_sevis_brightflame_shivarra : public CreatureScript
 {
-    npc_mardum_sevis_brightflame_shivarra(Creature* creature) : ScriptedAI(creature) { }
+public:
+    npc_mardum_sevis_brightflame_shivarra() : CreatureScript("npc_mardum_sevis_brightflame_shivarra") { }
 
-    // TEMP FIX, will need gossip
-    void MoveInLineOfSight(Unit* unit) override
+    bool OnGossipSelect(Player* player, Creature* creature, uint32 /*sender*/, uint32 /*action*/) override
     {
-        if (Player* player = unit->ToPlayer())
-            if (player->GetDistance(me) < 5.0f)
-                if (!player->GetQuestObjectiveData(QUEST_SHIVARRA_FORCES, 0))
-                    player->KilledMonsterCredit(me->GetEntry());
+        if (player->GetQuestStatus(QUEST_SEVIS_SACRIFICED) == QUEST_STATUS_INCOMPLETE)
+            player->ForceCompleteQuest(QUEST_SEVIS_SACRIFICED);
+
+        CloseGossipMenuFor(player);
+
+        player->GetScheduler().Schedule(Seconds(2), [creature](TaskContext /*context*/)
+        {
+            creature->DespawnOrUnsummon();
+        });
+
+        return true;
+    }
+
+    struct npc_mardum_sevis_brightflame_shivarraAI : public ScriptedAI
+    {
+        npc_mardum_sevis_brightflame_shivarraAI(Creature* creature) : ScriptedAI(creature) { }
+
+        // TEMP FIX, will need gossip
+        void MoveInLineOfSight(Unit* unit) override
+        {
+            if (Player* player = unit->ToPlayer())
+                if (player->GetDistance(me) < 5.0f)
+                    if (!player->GetQuestObjectiveData(QUEST_SHIVARRA_FORCES, 0))
+                        player->KilledMonsterCredit(me->GetEntry());
+        }
+    };
+
+    CreatureAI* GetAI(Creature* creature) const override
+    {
+        return new npc_mardum_sevis_brightflame_shivarraAI(creature);
     }
 };
 
@@ -1482,6 +1510,8 @@ public:
             _playerParticipating = false;
             _combatStarted = false;
             _swarmSummoned = 0;
+            _keystoneGranted = false;
+            _keystoneRecipients.clear();
         }
 
         void Reset() override
@@ -1534,17 +1564,90 @@ public:
             {
                 _events.ScheduleEvent(EVENT_TYRANNA_DIED, 0);
 
+                // EN: Grant kill credit to the whole threat list here,
+                // before the real death goes through the engine. In this
+                // scripted fight the finishing blow is often attributed to
+                // a companion NPC (Kayn/Korvas/Jace/Allari) rather than the
+                // player, so the normal "kill this monster" objective
+                // doesn't reliably fire for the player. Objective 2
+                // (101760) was already handled this way; objective 0 (her
+                // own kill, entry 93802) was missing the same treatment.
+                // The quest item (objective 1) is granted separately in
+                // JustDied(), through the corpse loot -- see there for why.
+                // ES: Otorga el credito de kill a toda la threat list aca,
+                // antes de que la muerte real pase por el motor. En esta
+                // pelea guionada el golpe final suele quedar atribuido a un
+                // NPC acompanante (Kayn/Korvas/Jace/Allari) en vez de al
+                // jugador, asi que el objetivo normal de "matar a este
+                // monstruo" no dispara de forma confiable para el jugador.
+                // El objetivo 2 (101760) ya se manejaba asi; al objetivo 0
+                // (matarla a ella, entry 93802) le faltaba el mismo
+                // tratamiento. El item de la quest (objetivo 1) se otorga
+                // aparte en JustDied(), a traves del loot del cadaver -- ver
+                // ahi el por que.
+                // EN: The engine clears the threat list (Unit::DeleteThreatList)
+                // right before calling JustDied(), so it's already empty by
+                // then -- remember who's eligible for the quest item here,
+                // while the threat list is still valid, and grant it from
+                // JustDied() using this list instead of re-reading threat.
+                // ES: El motor vacia la threat list (Unit::DeleteThreatList)
+                // justo antes de llamar a JustDied(), asi que ya esta vacia
+                // para entonces -- acordate aca quien es elegible para el
+                // item de la quest, mientras la threat list todavia es
+                // valida, y otorgalo desde JustDied() usando esta lista en
+                // vez de releer la threat list.
                 std::list<HostileReference*> threatList;
                 threatList = me->getThreatManager().getThreatList();
                 for (std::list<HostileReference*>::const_iterator itr = threatList.begin(); itr != threatList.end(); ++itr)
                     if (Player* target = (*itr)->getTarget()->ToPlayer())
                         if (target->GetQuestStatus(38728) == QUEST_STATUS_INCOMPLETE)
+                        {
                             target->KilledMonsterCredit(101760);
+                            target->KilledMonsterCredit(me->GetEntry());
+
+                            if (!target->HasItemCount(124672, 1))
+                                _keystoneRecipients.push_back(target->GetGUID());
+                        }
             }
         }
 
-        void JustDied(Unit* killer) override
+        void JustDied(Unit* /*killer*/) override
         {
+            // EN: Root cause of the whole "no loot cursor at all" symptom.
+            // Creature::m_PlayerDamageReq starts at 50% of her max health
+            // (ResetPlayerDamageReq) and only gets decremented by damage a
+            // PLAYER deals (Unit::DealDamage -> Creature::LowerPlayerDamageReq).
+            // Player::isAllowedToLoot() requires it to hit 0
+            // (IsDamageEnoughForLootingAndReward()), and the client-facing
+            // dynamic-flags serialization (ViewerDependentValue<DynamicFlagsTag>
+            // in ViewerDependentValues.h) strips UNIT_DYNFLAG_LOOTABLE
+            // entirely for a viewer that fails that check -- no server-side
+            // fix (AddDynamicFlag, AddLootRecipient, loot.AddItem, all
+            // below) can compensate for that, since it's stripped downstream
+            // of all of it, per-viewer, at packet-build time. In this fight
+            // 4 companion NPCs (Jace/Kayn/Kor'vas/Allari) do most of the
+            // damage, so the player's own share realistically never reaches
+            // 50% of her health. Zero it out here so looting isn't gated on
+            // a design that assumes a solo/mostly-player fight.
+            // ES: Causa raiz de todo el sintoma de "ni aparece el cursor de
+            // loot". Creature::m_PlayerDamageReq arranca en 50% de su vida
+            // maxima (ResetPlayerDamageReq) y solo se descuenta con dano que
+            // hace un JUGADOR (Unit::DealDamage -> Creature::LowerPlayerDamageReq).
+            // Player::isAllowedToLoot() exige que llegue a 0
+            // (IsDamageEnoughForLootingAndReward()), y la serializacion de
+            // dynamic flags para el cliente (ViewerDependentValue<DynamicFlagsTag>
+            // en ViewerDependentValues.h) saca UNIT_DYNFLAG_LOOTABLE por
+            // completo para un viewer que falla ese chequeo -- ningun fix
+            // del lado servidor (AddDynamicFlag, AddLootRecipient,
+            // loot.AddItem, todo lo de abajo) puede compensar eso, porque se
+            // saca aguas abajo de todo eso, por viewer, al armar el paquete.
+            // En esta pelea 4 NPCs acompanantes (Jace/Kayn/Kor'vas/Allari)
+            // hacen la mayor parte del dano, asi que la parte del jugador
+            // realisticamente nunca llega al 50% de su vida. Lo ponemos en
+            // cero aca para que lootear no dependa de un diseno que asume
+            // una pelea solo/mayormente del jugador.
+            me->m_PlayerDamageReq = 0;
+
             std::list<Creature*> summonedSwarm;
             me->GetCreatureListWithEntryInGrid(summonedSwarm, NPC_TYRANNA_SPAWN, me->GetVisibilityRange());
             for (std::list<Creature*>::const_iterator itr = summonedSwarm.begin(); itr != summonedSwarm.end(); ++itr)
@@ -1558,6 +1661,105 @@ public:
                 creature->AI()->SetData(DATA_TYRANNA_DEATH, DATA_TYRANNA_DEATH);
             if (Creature* creature = me->FindNearestCreature(NPC_ALLARI_TYRANNA, me->GetVisibilityRange(), true))
                 creature->AI()->SetData(DATA_TYRANNA_DEATH, DATA_TYRANNA_DEATH);
+
+            // EN: Put the Sargerite Keystone in the corpse loot instead of
+            // silently adding it to the bag, so the player picks it up like
+            // any other quest item. By this point the engine already ran
+            // its own loot fill for creature_loot_template (Unit::Kill,
+            // before DeleteThreatList()/JustDied()), so me->loot is the
+            // real, final loot object for this corpse -- AddItem() here
+            // just appends to it, it won't get overwritten afterwards.
+            // Uses _keystoneRecipients (captured in DamageTaken, see there)
+            // instead of the threat list, which the engine already cleared
+            // by now. AddLootRecipient() guards against this fight's
+            // tap/kill attribution quirk also affecting who is allowed to
+            // open the corpse.
+            // ES: Pone el Sargerite Keystone en el loot del cadaver en vez
+            // de agregarlo en silencio a la mochila, para que el jugador lo
+            // recoja como cualquier otro item de quest. A esta altura el
+            // motor ya corrio su propio llenado de loot para
+            // creature_loot_template (Unit::Kill, antes de
+            // DeleteThreatList()/JustDied()), asi que me->loot ya es el
+            // objeto de loot real y final de este cadaver -- AddItem() aca
+            // solo le suma, no se pisa despues. Usa _keystoneRecipients
+            // (capturada en DamageTaken, ver ahi) en vez de la threat list,
+            // que el motor ya vacio para este momento. AddLootRecipient()
+            // cubre que la misma rareza de atribucion de tap/kill de esta
+            // pelea tambien afecte quien tiene permiso de abrir el cadaver.
+            if (!_keystoneGranted)
+            {
+                bool grantedToAnyone = false;
+                for (ObjectGuid const& guid : _keystoneRecipients)
+                {
+                    Player* target = ObjectAccessor::GetPlayer(*me, guid);
+                    if (target && !target->HasItemCount(124672, 1))
+                    {
+                        me->AddLootRecipient(target);
+                        // EN: needs_quest=false on purpose. With it true,
+                        // LootItem::AllowedForPlayer() re-checks eligibility
+                        // via Player::HasQuestForItem(), which walks the
+                        // player's quest LOG SLOTS (GetQuestSlotQuestId),
+                        // not character_queststatus / GetQuestStatus(). That
+                        // diverged for the GM-added test quest (visible as
+                        // INCOMPLETE via GetQuestStatus, which is what we
+                        // already checked above, but not found in a log
+                        // slot), so the item silently never showed in loot
+                        // despite every server-side flag/recipient/loot
+                        // state being correct. We already did our own
+                        // eligibility check (GetQuestStatus == INCOMPLETE)
+                        // before getting here, so the engine's extra gate is
+                        // redundant -- and, for this fight, unreliable.
+                        // ES: needs_quest=false a proposito. Con true,
+                        // LootItem::AllowedForPlayer() vuelve a chequear
+                        // elegibilidad via Player::HasQuestForItem(), que
+                        // recorre los SLOTS del quest log del jugador
+                        // (GetQuestSlotQuestId), no character_queststatus /
+                        // GetQuestStatus(). Eso diverge para la quest de
+                        // prueba agregada por GM (aparece INCOMPLETE via
+                        // GetQuestStatus, que es lo que ya chequeamos
+                        // arriba, pero no aparece en ningun slot del log),
+                        // asi que el item nunca se mostraba en el loot en
+                        // silencio pese a que todo el estado de
+                        // flags/recipients/loot del lado del servidor
+                        // estaba bien. Ya hicimos nuestro propio chequeo de
+                        // elegibilidad (GetQuestStatus == INCOMPLETE) antes
+                        // de llegar aca, asi que el filtro extra del motor
+                        // es redundante -- y, para esta pelea, poco
+                        // confiable.
+                        me->loot.AddItem(LootStoreItem(124672, LOOT_ITEM_TYPE_ITEM, 0, 100.0f, false, 1, 0, 1, 1), target);
+                        grantedToAnyone = true;
+                    }
+                }
+
+                // EN: Whether the corpse shows up as lootable at all
+                // (UNIT_DYNFLAG_LOOTABLE) was already decided by the engine
+                // BEFORE JustDied() ran, based on the *normal* loot fill for
+                // whoever it considered a valid recipient at that point (see
+                // Unit::Kill in Unit.cpp). In this fight that natural check
+                // can come up empty for the player (same tap/kill
+                // attribution quirk as above), leaving the flag unset --
+                // meaning our manually-added item above would sit in
+                // me->loot.items but the client would never even show the
+                // corpse as lootable to open it. Force the flag on if we
+                // just added something, regardless of what the engine
+                // decided on its own.
+                // ES: Si el cadaver aparece como lootable (UNIT_DYNFLAG_LOOTABLE)
+                // ya lo decidio el motor ANTES de que corriera JustDied(), en
+                // base al llenado de loot *normal* para quien haya
+                // considerado un destinatario valido en ese momento (ver
+                // Unit::Kill en Unit.cpp). En esta pelea ese chequeo natural
+                // puede salir vacio para el jugador (la misma rareza de
+                // atribucion de tap/kill de arriba), dejando la bandera sin
+                // prender -- lo que significa que el item que agregamos a
+                // mano arriba quedaria en me->loot.items pero el cliente ni
+                // siquiera mostraria el cadaver como lootable para abrirlo.
+                // Forzamos la bandera si acabamos de agregar algo, sin
+                // importar lo que haya decidido el motor por su cuenta.
+                if (grantedToAnyone)
+                    me->AddDynamicFlag(UNIT_DYNFLAG_LOOTABLE);
+
+                _keystoneGranted = true;
+            }
 
             me->ForcedDespawn(15000, 3s);
         }
@@ -1633,6 +1835,8 @@ public:
         bool _playerParticipating;
         bool _combatStarted;
         uint8 _swarmSummoned;
+        bool _keystoneGranted;
+        std::vector<ObjectGuid> _keystoneRecipients;
     };
 
     CreatureAI* GetAI(Creature* creature) const override
@@ -1912,7 +2116,7 @@ void AddSC_zone_mardum()
     new go_meeting_with_queen_ritual();
     new scene_mardum_meeting_with_queen();
     RegisterCreatureAI(npc_doom_commander_beliash);
-    RegisterCreatureAI(npc_mardum_sevis_brightflame_shivarra);
+    new npc_mardum_sevis_brightflame_shivarra();
     new go_mardum_portal_shivarra();
     new npc_mardum_captain();
     new npc_mardum_jace_darkweaver();

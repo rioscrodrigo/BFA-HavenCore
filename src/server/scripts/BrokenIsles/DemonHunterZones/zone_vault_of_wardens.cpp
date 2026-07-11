@@ -47,6 +47,7 @@
 #include "UpdateData.h"
 #include "GameObject.h"
 #include "ObjectMgr.h"
+#include "ScriptedGossip.h"
 
 
 // npc 92782 92776 quest 38689 (savage felstalker, Fel Shocktrooper)
@@ -387,10 +388,18 @@ public:
 
     bool OnQuestAccept(Player* player, Creature* creature, Quest const* quest) override
     {
-        // quest 39683 - forged in fire
-        if (quest->GetQuestId() == 39683)
-            if (const Quest* quest = sObjectMgr->GetQuestTemplate(40254))
-                player->AddQuest(quest, nullptr); // add quest "40254 forged in fire" also
+        // EN: Quest 40254 is a hidden duplicate of 39683 ("Forged in Fire") used only to
+        // grant the off-spec artifact unlock spell (see npc_96682::JustDied below). Silently
+        // adding it to the player's quest log made "Forged in Fire" appear twice in the
+        // client UI. It's not needed: JustDied already grants both reward spells based on
+        // quest 39683's status alone (the QUEST1||QUEST2 check), so nothing is lost.
+        // ES: La quest 40254 es una copia oculta de la 39683 ("Forged in Fire") que solo
+        // servía para otorgar el hechizo de desbloqueo de artefacto de la otra
+        // especialización (ver npc_96682::JustDied mas abajo). Agregarla en silencio al
+        // registro de misiones del jugador hacia que "Forged in Fire" apareciera duplicada
+        // en el cliente. No hace falta: JustDied ya otorga ambos hechizos de recompensa
+        // usando solo el estado de la quest 39683 (chequeo QUEST1||QUEST2), asi que no se
+        // pierde nada al quitarla.
 
         // quest 39684 - beam me up
         if (quest->GetQuestId() == 39686)
@@ -430,12 +439,93 @@ class npc_97644 : public CreatureScript
 public:
     npc_97644() : CreatureScript("npc_97644") {}
 
+    enum
+    {
+        QUEST_POOL_OF_JUDGEMENTS      = 40373,
+        QUEST_BETWEEN_US_HAVOC        = 39688, // "Between Us and Freedom" - Havoc variant (RewardDisplaySpell 198589)
+        QUEST_BETWEEN_US_VENGEANCE    = 40255, // "Between Us and Freedom" - Vengeance variant (RewardDisplaySpell 185245)
+    };
+
     bool OnQuestAccept(Player* player, Creature* creature, Quest const* quest) override
     {
-        if (quest->GetQuestId() == 40373)
+        if (quest->GetQuestId() == QUEST_POOL_OF_JUDGEMENTS)
             player->CastSpell(player, 196650, true); // cast player choice window
 
         return true;
+    }
+
+    // EN: "Between Us and Freedom" used to exist as 4 separate quest_template rows
+    // (39688/39694/40255/40256, same title/objective) all offered by this same NPC via
+    // creature_queststarter with no spec filter, so the client listed all 4 and nothing
+    // stopped a player from accepting more than one - seen as a duplicated quest with two
+    // different rewards (the RewardDisplaySpell differs per spec pair). This engine has no
+    // CONDITION_* type for talent spec, so the DB alone can't filter which variant to show.
+    // Fix: 39688 (Havoc) and 40255 (Vengeance) are kept in creature_queststarter (needed for
+    // Creature::hasQuest() to accept the client's "Accept Quest" click, and for the normal
+    // quest-giver "!" to show above this NPC's head) with a shared negative ExclusiveGroup
+    // (-39688) as a safety net so the client itself won't offer both at once. On top of that,
+    // this OnGossipHello picks the correct one by spec and pushes the NATIVE quest-offer
+    // popup directly (title/description/objectives/reward exactly as retail shows it) instead
+    // of letting the generic multi-quest listing run - so the player only ever sees the one
+    // variant that matches their spec. 39694/40256 (the other engine's "shadow" pair) are
+    // left out of creature_queststarter entirely - Bastillax's kill script
+    // (npc_96783AI::JustDied) already OR-checks all 4 quest IDs and grants both reward spells
+    // regardless of which one the player has, so only one needs to actually be offered/held.
+    // ES: "Between Us and Freedom" existia como 4 filas separadas de quest_template
+    // (39688/39694/40255/40256, mismo titulo/objetivo) ofrecidas todas por este mismo NPC via
+    // creature_queststarter sin ningun filtro de especializacion, asi que el cliente listaba
+    // las 4 y nada impedia aceptar mas de una - se veia como una quest duplicada con dos
+    // recompensas distintas (el RewardDisplaySpell difiere por par de spec). Este motor no
+    // tiene ningun CONDITION_* para especializacion de talentos, asi que la DB sola no puede
+    // filtrar que variante mostrar. Fix: 39688 (Havoc) y 40255 (Vengeance) se dejan en
+    // creature_queststarter (hace falta para que Creature::hasQuest() acepte el click de
+    // "Aceptar" del cliente, y para que aparezca el simbolo "!" normal de quest sobre este
+    // NPC) con un ExclusiveGroup negativo compartido (-39688) como red de seguridad para que
+    // el cliente mismo no ofrezca las dos juntas. Ademas de eso, este OnGossipHello elige la
+    // correcta segun la especializacion y manda el popup NATIVO de oferta de quest
+    // directamente (titulo/descripcion/objetivos/recompensa tal cual los muestra retail) en
+    // vez de dejar correr el listado generico multi-quest - asi el jugador solo ve la variante
+    // que corresponde a su spec. 39694/40256 (el par "sombra" del otro spec) quedan fuera de
+    // creature_queststarter por completo - el script de muerte de Bastillax
+    // (npc_96783AI::JustDied) ya chequea las 4 quest IDs con OR y otorga ambos hechizos de
+    // recompensa sin importar cual tiene el jugador, asi que alcanza con que una sola se
+    // ofrezca/tenga.
+    // EN: An earlier version of this fix called SendQuestGiverQuestDetails directly, which
+    // skipped straight to the Accept/Decline popup with no greeting text - this NPC actually
+    // has a real npc_text/gossip_menu_option configured (gossip_menu_id 19012), so the normal
+    // engine flow (PrepareGossipMenu -> PrepareQuestMenu -> SendPreparedGossip) shows the
+    // greeting text with the quest listed as a clickable line, same as any other quest giver
+    // with dialogue. We still can't let PrepareQuestMenu add both spec variants on its own
+    // (it has no notion of spec), so it runs normally and then we trim the quest menu down
+    // to just the one that matches the player's spec before sending it.
+    // ES: Una version anterior de este fix llamaba a SendQuestGiverQuestDetails directo, lo
+    // que saltaba directo al popup de Aceptar/Rechazar sin texto de saludo - este NPC en
+    // realidad tiene un npc_text/gossip_menu_option real configurado (gossip_menu_id 19012),
+    // asi que el flujo normal del motor (PrepareGossipMenu -> PrepareQuestMenu ->
+    // SendPreparedGossip) muestra el texto de saludo con la quest listada como una linea
+    // clickeable, igual que cualquier otro quest giver con dialogo. Igual no podemos dejar
+    // que PrepareQuestMenu agregue las dos variantes de spec solas (no tiene nocion de spec),
+    // asi que corre normal y despues recortamos el menu de quests a solo la que corresponde
+    // a la especializacion del jugador antes de mandarlo.
+    bool OnGossipHello(Player* player, Creature* creature) override
+    {
+        if (player->GetQuestRewardStatus(QUEST_POOL_OF_JUDGEMENTS) &&
+            player->GetQuestStatus(QUEST_BETWEEN_US_HAVOC) == QUEST_STATUS_NONE &&
+            player->GetQuestStatus(QUEST_BETWEEN_US_VENGEANCE) == QUEST_STATUS_NONE &&
+            !player->GetQuestRewardStatus(QUEST_BETWEEN_US_HAVOC) &&
+            !player->GetQuestRewardStatus(QUEST_BETWEEN_US_VENGEANCE))
+        {
+            uint32 questId = player->GetPrimarySpecialization() == TALENT_SPEC_DEMON_HUNTER_VENGEANCE
+                ? QUEST_BETWEEN_US_VENGEANCE : QUEST_BETWEEN_US_HAVOC;
+
+            player->PrepareGossipMenu(creature, creature->GetCreatureTemplate()->GossipMenuId, true);
+            player->PlayerTalkClass->GetQuestMenu().ClearMenu();
+            player->PlayerTalkClass->GetQuestMenu().AddMenuItem(questId, 2); // icon 2 = quest available to accept
+            player->SendPreparedGossip(creature);
+            return true;
+        }
+
+        return false;
     }
 };
 
@@ -898,6 +988,178 @@ public:
     };
 };
 
+// EN: npc 96680 (Glazer) + gob 244449 (Reflective Mirror) - quest 39684 (Beam Me Up).
+// Solo/personal-phase variant of the "Glazer" encounter used by the real Vault of the
+// Wardens dungeon boss (see BrokenIsles/VaultOfTheWardens/boss_glazer.cpp, npc 95887),
+// simplified for the class-hall intro quest room per the TODO note at the top of this
+// file ("boss glazer script - npc 96680 ... donot use the instance VoW script, cannot
+// be used for 1 player!"). Reuses the same verified spell IDs as the real boss (Lingering
+// Gaze slow, Pulse damage "orbs") instead of inventing new ones, and redirects the beam
+// back onto Glazer through a single Reflective Mirror instead of the dungeon's 3-lens
+// chain, since the quest room only has the one mirror.
+// ES: npc 96680 (Glazer) + gob 244449 (Reflective Mirror) - quest 39684 (Beam Me Up).
+// Variante solo/personal del encuentro "Glazer" que usa el boss real de la mazmorra Vault
+// of the Wardens (ver BrokenIsles/VaultOfTheWardens/boss_glazer.cpp, npc 95887),
+// simplificada para la sala de la quest de introduccion de la orden segun la nota TODO al
+// inicio de este archivo ("cannot be used for 1 player!"). Reutiliza los mismos spell IDs
+// verificados del boss real (Lingering Gaze, "orbes" de dano Pulse) en vez de inventar
+// nuevos, y redirige el rayo hacia Glazer con un unico espejo en vez de la cadena de 3
+// lentes de la mazmorra, ya que la sala de la quest solo tiene un espejo.
+enum GlazerSoloData
+{
+    QUEST_BEAM_ME_UP            = 39684,
+    CREDIT_GLAZER               = 96680, // same entry as the creature - kill credit dummy
+
+    SPELL_GLAZER_PULSE          = 194849, // periodic damage "orb" - reused from boss_glazer.cpp
+    SPELL_GLAZER_PULSE_AT       = 194853,
+    SPELL_GLAZER_LINGERING_GAZE = 194942, // slowing gaze field - reused from boss_glazer.cpp
+    SPELL_GLAZER_BEAM_VIS_3     = 193373, // beam passing through the mirror - reused from boss_glazer.cpp
+    SPELL_GLAZER_BEAM_VIS_4     = 194333, // beam hits Glazer ("shield broken") - reused from boss_glazer.cpp
+
+    EVENT_GLAZER_PULSE          = 1,
+    EVENT_GLAZER_LINGERING_GAZE = 2,
+
+    ACTION_GLAZER_SHIELD_BROKEN = 1,
+};
+
+class npc_96680 : public CreatureScript
+{
+public:
+    npc_96680() : CreatureScript("npc_96680") { }
+
+    CreatureAI* GetAI(Creature* creature) const override
+    {
+        return new npc_96680AI(creature);
+    }
+
+    struct npc_96680AI : public ScriptedAI
+    {
+        npc_96680AI(Creature* creature) : ScriptedAI(creature)
+        {
+            // TODO note at the top of this file: "he should be stunned and nonattackable."
+            // EN: Root + immune-to-PC (not a real UNIT_STATE_STUNNED aura) so he still can
+            // cast Pulse/Lingering Gaze - a genuinely stunned caster fails SPELL_FAILED_STUNNED
+            // (see Spell::CheckCasterAuras). This creature's DB creature_addon used to carry a
+            // real stun aura (202220) that silently blocked every cast; it was removed.
+            // ES: Root + inmune a jugadores (no un aura real de UNIT_STATE_STUNNED) para que
+            // pueda seguir lanzando Pulse/Lingering Gaze - un caster realmente aturdido falla
+            // con SPELL_FAILED_STUNNED (ver Spell::CheckCasterAuras). El creature_addon de este
+            // NPC en la base traia un aura de stun real (202220) que bloqueaba todos los casteos
+            // en silencio; se quito.
+            me->SetReactState(REACT_PASSIVE);
+            me->AddUnitFlag(UNIT_FLAG_IMMUNE_TO_PC);
+            me->SetControlled(true, UNIT_STATE_ROOT);
+        }
+
+        EventMap events;
+        bool _shieldBroken;
+
+        void Reset() override
+        {
+            _shieldBroken = false;
+            events.Reset();
+            events.RescheduleEvent(EVENT_GLAZER_PULSE, 8000);
+            events.RescheduleEvent(EVENT_GLAZER_LINGERING_GAZE, 14000);
+        }
+
+        // EN: Called by go_244449 (Reflective Mirror) once the beam is redirected onto Glazer.
+        // Uses a dedicated flag instead of UnitState/aura checks, since those are also used
+        // for the (unrelated) "imprisoned" root/immune flavor above.
+        // ES: Lo llama go_244449 (Reflective Mirror) cuando el rayo se redirige contra Glazer.
+        // Usa un flag propio en vez de chequear UnitState/auras, ya que esos tambien los usa
+        // (sin relacion) el "root"/inmune de arriba para el flavor de "esta preso".
+        void DoAction(int32 action) override
+        {
+            if (action == ACTION_GLAZER_SHIELD_BROKEN && !_shieldBroken)
+            {
+                _shieldBroken = true;
+                me->InterruptNonMeleeSpells(false);
+                me->CastSpell(me, SPELL_GLAZER_BEAM_VIS_4, true);
+            }
+        }
+
+        // EN: Only players still working on "Beam Me Up" get hit by the hazards - avoids
+        // spamming spells at an empty room or at players unrelated to this quest.
+        // ES: Solo a los jugadores que todavia estan haciendo "Beam Me Up" les llegan los
+        // peligros - evita tirar hechizos en una sala vacia o a jugadores ajenos a esta quest.
+        Player* SelectQuestTarget(float range)
+        {
+            std::list<Player*> players;
+            me->GetPlayerListInGrid(players, range);
+            players.remove_if([](Player* p) { return p->GetQuestStatus(QUEST_BEAM_ME_UP) != QUEST_STATUS_INCOMPLETE; });
+
+            if (players.empty())
+                return nullptr;
+
+            auto it = players.begin();
+            std::advance(it, urand(0, uint32(players.size()) - 1));
+            return *it;
+        }
+
+        void SpellHitTarget(Unit* target, SpellInfo const* spell) override
+        {
+            if (spell->Id == SPELL_GLAZER_PULSE)
+            {
+                me->SetFacingToObject(target);
+                DoCast(me, SPELL_GLAZER_PULSE_AT, true);
+            }
+        }
+
+        void UpdateAI(uint32 diff) override
+        {
+            // Beam already redirected through the mirror - stop bothering the player.
+            if (_shieldBroken)
+                return;
+
+            events.Update(diff);
+
+            if (uint32 eventId = events.ExecuteEvent())
+            {
+                switch (eventId)
+                {
+                    case EVENT_GLAZER_PULSE:
+                        if (Player* target = SelectQuestTarget(40.0f))
+                            DoCast(target, SPELL_GLAZER_PULSE);
+                        events.RescheduleEvent(EVENT_GLAZER_PULSE, 10000);
+                        break;
+                    case EVENT_GLAZER_LINGERING_GAZE:
+                        if (Player* target = SelectQuestTarget(40.0f))
+                            DoCast(target, SPELL_GLAZER_LINGERING_GAZE);
+                        events.RescheduleEvent(EVENT_GLAZER_LINGERING_GAZE, 18000);
+                        break;
+                }
+            }
+        }
+    };
+};
+
+// gob 244449 (Reflective Mirror) - quest 39684 (Beam Me Up)
+class go_244449 : public GameObjectScript
+{
+public:
+    go_244449() : GameObjectScript("go_244449") { }
+
+    bool OnGossipHello(Player* player, GameObject* go) override
+    {
+        if (player->GetQuestStatus(QUEST_BEAM_ME_UP) != QUEST_STATUS_INCOMPLETE)
+            return false;
+
+        if (Creature* glazer = go->FindNearestCreature(CREDIT_GLAZER, 60.0f, true))
+        {
+            // redirect the beam back through the mirror onto Glazer, breaking his shield.
+            // AI::DoAction is idempotent (checks its own _shieldBroken flag), so it's safe
+            // to call this every time the mirror is used, not just the first.
+            go->CastSpell(glazer, SPELL_GLAZER_BEAM_VIS_3, true);
+            glazer->AI()->DoAction(ACTION_GLAZER_SHIELD_BROKEN);
+            glazer->SetControlled(true, UNIT_STATE_STUNNED); // final "defeated" visual
+
+            player->KilledMonsterCredit(CREDIT_GLAZER);
+        }
+
+        return true;
+    }
+};
+
 // npc 96783 (Bastillax)
 class npc_96783 : public CreatureScript
 {
@@ -1035,5 +1297,7 @@ void AddSC_zone_vault_of_wardens()
     new npc_97978();                    // npc 97978 (Archmage Khadgar)
     new PlayerScript_bonus_objective(); // world bonus quest 39742
     new npc_96682();                    // npc 96682 (immolanth)
+    new npc_96680();                    // npc 96680 (Glazer) - quest 39684 (Beam Me Up)
+    new go_244449();                    // gob 244449 (Reflective Mirror) - quest 39684 (Beam Me Up)
     new npc_96783();                    // npc 96783 (Bastillax)
 }

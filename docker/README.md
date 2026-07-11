@@ -286,6 +286,39 @@ docker compose build worldserver bnetserver
 docker compose up -d worldserver bnetserver
 ```
 
+##### Fast C++ iteration (`dev-builder`)
+
+`docker compose build worldserver bnetserver` rebuilds the multi-stage
+image, and on this Docker Desktop setup BuildKit's `--mount=type=cache`
+doesn't reliably survive between separate `docker compose build` runs — so
+every rebuild can take the full **~20-25 minutes** (~1990 C++ files), even
+for a one-line change. There's a `dev-builder` service that avoids this by
+bind-mounting the repo and using a real named Docker volume (not a cache
+mount) for the build directory, so `ninja` does genuine incremental builds:
+
+```bash
+docker compose build dev-builder   # once, just the toolchain (~1 min)
+docker compose run --rm dev-builder
+```
+
+The first run populates the volume (same ~20-25 min as a full build). After
+that, changing one `.cpp` and running `docker compose run --rm dev-builder`
+again only recompiles what changed — confirmed in testing to drop from
+~25 minutes to about **2 minutes** (and most of that remaining time is
+CMake's own reconfigure step, not actual compilation; `ninja` reports
+`no work to do` when nothing changed).
+
+Use this to quickly check that a content/script fix compiles. It only
+compiles — it doesn't produce a runnable image. Once you're happy with the
+change, run `docker compose build worldserver bnetserver` (still slow, see
+above) to get an updated image you can actually start and test in-game.
+
+> Increasing Docker Desktop's CPU/memory allocation won't help here: `docker
+> info` already reports the daemon sees all of the host's CPUs and about
+> half its RAM, matching the `-j$(nproc)` used for the build — the time is
+> genuinely spent compiling ~1990 heavy C++ translation units, not waiting
+> on constrained resources.
+
 #### 10. Troubleshooting
 
 **`bnetserver`/`worldserver` keep restarting in a loop right after
@@ -660,6 +693,43 @@ docker compose down -v
 docker compose build worldserver bnetserver
 docker compose up -d worldserver bnetserver
 ```
+
+##### Iteración rápida en C++ (`dev-builder`)
+
+`docker compose build worldserver bnetserver` reconstruye la imagen
+multi-stage, y en este Docker Desktop el `--mount=type=cache` de BuildKit
+no sobrevive de forma confiable entre corridas separadas de
+`docker compose build` — así que cada rebuild puede tardar los
+**~20-25 minutos** completos (~1990 archivos C++), incluso para un cambio
+de una línea. Hay un servicio `dev-builder` que evita esto montando el
+repo directo y usando un volumen Docker nombrado real (no un cache mount)
+para el directorio de build, así `ninja` hace builds incrementales de
+verdad:
+
+```bash
+docker compose build dev-builder   # una vez, solo el toolchain (~1 min)
+docker compose run --rm dev-builder
+```
+
+La primera corrida puebla el volumen (los mismos ~20-25 min que un build
+completo). Después de eso, cambiar un `.cpp` y volver a correr
+`docker compose run --rm dev-builder` solo recompila lo que cambió —
+confirmado en pruebas que baja de ~25 minutos a unos **2 minutos** (y la
+mayor parte de ese tiempo restante es el propio paso de reconfigurar
+CMake, no compilación real; `ninja` reporta `no work to do` cuando no
+cambió nada).
+
+Usá esto para validar rápido que un fix de contenido/script compila. Solo
+compila — no genera una imagen ejecutable. Una vez que estés conforme con
+el cambio, corré `docker compose build worldserver bnetserver` (sigue
+siendo lento, ver arriba) para tener una imagen actualizada que puedas
+levantar y probar en el juego.
+
+> Subir la asignación de CPU/memoria de Docker Desktop no ayuda acá:
+> `docker info` ya muestra que el daemon ve todos los CPUs del host y
+> como la mitad de su RAM, coincidiendo con el `-j$(nproc)` que usa el
+> build — el tiempo se va genuinamente en compilar ~1990 unidades de
+> traducción C++ pesadas, no en esperar recursos limitados.
 
 #### 10. Troubleshooting
 

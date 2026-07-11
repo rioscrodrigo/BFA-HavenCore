@@ -1,0 +1,41 @@
+# EN: Lightweight runtime-only image, used by docker-compose.dev.yml. Does
+# NOT compile anything and does NOT bake /opt/bfacore in -- that comes from
+# the dev_install named volume populated by the "dev-builder" service
+# (docker compose run --rm dev-builder), so worldserver/bnetserver start
+# from whatever was last compiled there instead of waiting on a fresh
+# multi-stage build. See docker/README.md.
+# ES: Imagen liviana solo con el runtime, usada por docker-compose.dev.yml.
+# No compila nada y no hornea /opt/bfacore adentro -- eso viene del volumen
+# nombrado dev_install que puebla el servicio "dev-builder"
+# (docker compose run --rm dev-builder), asi worldserver/bnetserver
+# arrancan con lo ultimo que se compilo ahi en vez de esperar un build
+# multi-stage de cero. Ver docker/README.md.
+FROM ubuntu:24.04 AS runtime
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    libmysqlclient21 \
+    libssl3t64 \
+    libreadline8t64 \
+    zlib1g \
+    libbz2-1.0 \
+    libboost-system1.83.0 \
+    libboost-filesystem1.83.0 \
+    libboost-thread1.83.0 \
+    libboost-program-options1.83.0 \
+    libboost-iostreams1.83.0 \
+    libboost-regex1.83.0 \
+    && rm -rf /var/lib/apt/lists/*
+
+# EN: Lives outside /opt/bfacore on purpose: docker-compose.dev.yml mounts
+# the dev_install volume at /opt/bfacore, which would otherwise shadow
+# (hide) anything baked into the image under that same path.
+# ES: Vive fuera de /opt/bfacore a proposito: docker-compose.dev.yml monta
+# el volumen dev_install en /opt/bfacore, lo que taparia (ocultaria)
+# cualquier cosa horneada en la imagen bajo esa misma ruta.
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+WORKDIR /opt/bfacore/bin
+ENTRYPOINT ["/entrypoint.sh"]

@@ -1,0 +1,19 @@
+# EN: Toolchain-only image for fast C++ iteration. No source is baked in
+# (see the "dev-builder" service in docker-compose.yml, which bind-mounts
+# the repo and a real named volume for /build) so ninja does genuine
+# incremental builds, unaffected by BuildKit cache-mount eviction.
+# ES: Imagen solo con el toolchain para iterar rapido en C++. No hornea el
+# codigo fuente adentro (ver el servicio "dev-builder" en
+# docker-compose.yml, que monta el repo y un volumen nombrado real para
+# /build) para que ninja haga builds incrementales de verdad, sin
+# depender del cache mount de BuildKit (que en este Docker Desktop no
+# persiste entre builds).
+FROM ubuntu:24.04
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential gcc-13 g++-13 cmake ninja-build git ca-certificates pkg-config \
+    libboost-all-dev libmysqlclient-dev libssl-dev libbz2-dev libreadline-dev zlib1g-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /src
