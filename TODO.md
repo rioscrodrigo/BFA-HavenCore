@@ -132,3 +132,35 @@ completados, solo tildarlos - sirven de historial de que se reviso.
       Confirmado en el juego que ya no se puede tomar mas de una vez.
       Falta confirmar con un personaje Vengeance que recibe la variante 40255
       y no la Havoc.
+
+## "Warchief's Command Board" en Orgrimmar - desborde de lista, sin scroll
+
+- [x] Reportado: la ventana de gossip del "Warchief's Command Board" (tablero
+      de misiones bajo nivel de Cataclysm, ej. "Warchief's Command: Vashj'ir!",
+      "...Winterspring!", etc.) desborda el contenido y el scrollbar no
+      habilita/no funciona - se ven las primeras entradas pero no se puede
+      bajar a ver el resto de la lista. Confirmado sin addons, mismo
+      resultado.
+      Investigado: el gameobject en Orgrimmar es entry **206109** (`map 1`,
+      ~1609,-4386,20 - hay otro gob identico muy cerca, entry **281340** en
+      ~1600,-4369,20, casi superpuestos - posible duplicado de spawn, ver
+      nota abajo, pero no es la causa de esto). Via `gameobject_queststarter`
+      ofrece **29 quests reales, todas distintas** (una por zona: Vashj'ir,
+      Mount Hyjal, Deepholm, Ashenvale, Northern Barrens, Azshara, Thousand
+      Needles, Tanaris, Feralas, Un'Goro Crater, Silithus, Stonetalon
+      Mountains, Felwood, Winterspring, Desolace, Dustwallow Marsh, Southern
+      Barrens, Twilight Highlands, Uldum, Borean Tundra, Outland, + varias
+      "Warchief's Command" no-zonales) - **sin duplicados**.
+      **NO ES UN BUG - es asi tambien en el WoW retail oficial.** Confirmado
+      por busqueda web: hay multiples quejas identicas en los foros oficiales
+      de Blizzard ("Can we PLEASE get a scroll bar for the Warchief's Command
+      Board?") - Blizzard nunca le puso scrollbar a esta ventana en
+      particular; solo muestra ~3 misiones a la vez del pool de 29, y para
+      "ver mas" hay que aceptar/completar/abandonar las visibles para que
+      roten otras del pool, en vez de poder scrollear. Es una limitacion
+      real y conocida del cliente oficial de Blizzard para este tablero
+      especifico, no algo que dependa de este servidor ni del cliente del
+      jugador. Cerrado sin cambios de codigo/DB.
+      Nota aparte (no urgente, no relacionada al scroll): 206109 y 281340
+      parecen ser un spawn duplicado del mismo board casi en el mismo lugar
+      en Orgrimmar - revisar en algun momento si conviene sacar uno.
