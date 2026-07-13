@@ -1,0 +1,24 @@
+-- EN: Real root cause of the missing exclamation-mark-with-shield "important/story" quest icon
+-- for "Infusing the Heart" (52428) and "A Dying World" (52946 Alliance / 53028 Horde). It's NOT
+-- QuestInfoID (reverted the earlier 2026_07_11_10/11.sql attempt, which used 83 = "Legendary",
+-- an unrelated legacy system for old legendary-weapon questlines like Shadowmourne - confirmed
+-- wrong because "The Warchief's Order" (56030), which DOES show the icon correctly in-game, has
+-- QuestInfoID=0). The real driver is quest_template.FlagsEx2 bit 0x100 (256) - unnamed in this
+-- engine's QuestFlagsEx2 enum (only 0x2 "no war mode bonus" is mapped), but still transmitted
+-- to the client as raw bits and read by it. Confirmed by cross-referencing: only 37 quests in
+-- the whole world DB have this bit, and they're all major campaign/story content (56030/56031
+-- Warchief's Order/Wolf's Offensive, and the Ny'alotha campaign finale questline).
+--
+-- ES: Causa raiz real del icono faltante de exclamacion+escudo ("importante/historia") para
+-- "Infusing the Heart" (52428) y "A Dying World" (52946 Alianza / 53028 Horda). NO es
+-- QuestInfoID (se revierte el intento anterior de 2026_07_11_10/11.sql, que uso 83 =
+-- "Legendary", un sistema legado sin relacion para cadenas de armas legendarias viejas tipo
+-- Shadowmourne - confirmado mal porque "The Warchief's Order" (56030), que SI muestra el icono
+-- bien en el juego, tiene QuestInfoID=0). El driver real es el bit 0x100 (256) de
+-- quest_template.FlagsEx2 - sin nombre en el enum QuestFlagsEx2 de este motor (solo esta
+-- mapeado 0x2 "no war mode bonus"), pero se transmite igual al cliente como bits crudos y el
+-- cliente lo lee. Confirmado cruzando datos: solo 37 quests en toda la world DB tienen este
+-- bit, y todas son contenido de campana/historia principal (56030/56031 Warchief's Order/
+-- Wolf's Offensive, y la cadena final de la campana de Ny'alotha).
+
+UPDATE `quest_template` SET `QuestInfoID` = 0, `FlagsEx2` = `FlagsEx2` | 0x100 WHERE `ID` IN (52428, 52946, 53028);

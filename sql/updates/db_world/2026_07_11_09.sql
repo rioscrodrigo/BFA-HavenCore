@@ -1,0 +1,28 @@
+-- EN: "The Warchief's Order" (56030) kept re-showing its quest-accept popup on every login
+-- even while already in the active quest log. Root cause: it has QUEST_FLAGS_AUTO_ACCEPT
+-- (0x00080000) set - per QuestDef.h, "The client recognizes this flag as auto-accept," a
+-- client-driven behavior meant for quests granted through a real trigger (an NPC/scene the
+-- client properly acknowledges). This fork grants it silently via
+-- On120Arrival::OnLevelChanged (custom_player_script.cpp) calling player->AddQuest(quest,
+-- nullptr) directly, bypassing that real trigger - so the client never marks the auto-accept
+-- as "already handled" and keeps re-offering it on every login. Same broken combination
+-- (AUTO_ACCEPT flag + raw AddQuest grant) also affects its Alliance counterpart "The Wolf's
+-- Offensive" (56031, same PlayerScript) and both "A Dying World" quests (52946/53028, granted
+-- the same way by OnBfaArrival) - cleared the flag on all 4 for consistency, since none of
+-- them go through the real trigger this flag expects.
+--
+-- ES: "The Warchief's Order" (56030) seguia mostrando su popup de aceptar quest en cada
+-- login aunque ya estuviera en el log de misiones activas. Causa raiz: tiene
+-- QUEST_FLAGS_AUTO_ACCEPT (0x00080000) puesto - segun QuestDef.h, "The client recognizes
+-- this flag as auto-accept," un comportamiento manejado por el cliente pensado para quests
+-- otorgadas via un disparador real (un NPC/escena que el cliente reconoce correctamente).
+-- Este fork la otorga en silencio via On120Arrival::OnLevelChanged
+-- (custom_player_script.cpp) llamando a player->AddQuest(quest, nullptr) directo,
+-- saltandose ese disparador real - asi que el cliente nunca marca el auto-accept como "ya
+-- manejado" y la sigue re-ofreciendo en cada login. La misma combinacion rota (flag
+-- AUTO_ACCEPT + otorgamiento con AddQuest crudo) tambien afecta a su contraparte Alianza
+-- "The Wolf's Offensive" (56031, mismo PlayerScript) y a las dos "A Dying World"
+-- (52946/53028, otorgadas de la misma forma por OnBfaArrival) - se saco el flag de las 4 por
+-- consistencia, ya que ninguna pasa por el disparador real que este flag espera.
+
+UPDATE `quest_template` SET `Flags` = `Flags` & ~0x00080000 WHERE `ID` IN (56030, 56031, 52946, 53028);

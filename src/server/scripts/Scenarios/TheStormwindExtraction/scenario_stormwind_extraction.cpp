@@ -21,6 +21,7 @@
 #include "CreatureGroups.h"
 #include "GameObject.h"
 #include "InstanceScript.h"
+#include "Log.h"
 #include "Scenario.h"
 #include "stormwind_extraction.h"
 
@@ -41,20 +42,72 @@ struct scenario_stormwind_extraction : public InstanceScript
     };
 
     std::vector<TempSummon*> magicWalls;
+    bool _introStarted = false;
 
+    // EN: OnPlayerEnter fires every time a player enters this map, including re-entering an
+    // already-in-progress instance (e.g. after releasing from death and re-clicking the
+    // Skyhorn Eagle). Without this guard, the intro block below re-ran unconditionally,
+    // re-summoning SUMMON_GROUP_LION_REST/SUMMON_GROUP_TALANJI_ZUL_PRISON and re-sending
+    // SCENARIO_EVENT_STORMWIND_INFILTRATION even for a player who had already progressed well
+    // past that point (e.g. to Stage 3 "The Stockades") - re-summoning guard groups that were
+    // already cleared left gates that depend on OnCreatureGroupWipe/criteria completion stuck
+    // closed, since that progress-driven state didn't match the freshly re-summoned intro
+    // groups. Only run the intro once per scenario instance.
+    // ES: OnPlayerEnter se dispara cada vez que un jugador entra a este mapa, incluyendo
+    // volver a entrar a una instancia ya en progreso (ej. despues de liberar el espiritu al
+    // morir y volver a clickear el Skyhorn Eagle). Sin esta guarda, el bloque de introduccion
+    // de abajo se volvia a ejecutar sin condicion, re-summoneando
+    // SUMMON_GROUP_LION_REST/SUMMON_GROUP_TALANJI_ZUL_PRISON y reenviando
+    // SCENARIO_EVENT_STORMWIND_INFILTRATION incluso para un jugador que ya habia avanzado
+    // bastante mas alla de ese punto (ej. a la Etapa 3 "The Stockades") - re-summonear grupos
+    // de guardias que ya se habian limpiado dejaba compuertas que dependen de
+    // OnCreatureGroupWipe/completar criterios trabadas cerradas, porque ese estado dirigido
+    // por el progreso no coincidia con los grupos de introduccion recien re-summoneados. La
+    // introduccion solo debe correr una vez por instancia de escenario.
     void OnPlayerEnter(Player* player) override
     {
         if (!player->GetScenario())
             return;
 
+        if (_introStarted)
+            return;
+        _introStarted = true;
+
         CreatureGroup* talanjizulLionRest = SummonCreatureGroup(SUMMON_GROUP_LION_REST);
         SummonCreatureGroup(SUMMON_GROUP_TALANJI_ZUL_PRISON);
 
         // Temp introduction fix
-        player->GetScheduler().Schedule(2s, [player, talanjizulLionRest](TaskContext /*context*/)
+        player->GetScheduler().Schedule(2s, [this, player, talanjizulLionRest](TaskContext /*context*/)
         {
             talanjizulLionRest->MoveGroupTo(-8671.096680f, 915.972229f, 89.469795f);
             player->GetScenario()->SendScenarioEvent(player, SCENARIO_EVENT_STORMWIND_INFILTRATION);
+
+            // EN: Rokhan and Thalyssra both have UNIT_FLAG_IMMUNE_TO_NPC set by default in
+            // creature_template, which blocks them from engaging the 7th Legion guards
+            // entirely. Nothing in this script ever cleared it before the entrance-guard fight
+            // - only afterwards, at SCENARIO_EVENT_FIND_ROKHAN - so both companions stood idle
+            // through the opening fight and the player had to solo it (confirmed against
+            // retail footage: both allies fight from the very start). Clear it here (same
+            // delayed callback as the rest of the intro, so both creatures are guaranteed to
+            // be loaded/resolvable via GetCreature by now - calling this directly in
+            // OnPlayerEnter was too early and GetRokhan()/GetThalyssra() returned null) so they
+            // can fight from the opening encounter onward; OnCreatureGroupWipe
+            // (SUMMON_GROUP_GUARD_ENTRANCE) already re-applies it to Rokhan afterwards for his
+            // solo-stealth detour, so that later toggle is untouched.
+            // ES: Rokhan y Thalyssra tienen UNIT_FLAG_IMMUNE_TO_NPC puesto por defecto en
+            // creature_template, lo que les impide pelear contra los guardias del 7th Legion
+            // por completo. Nada en este script lo sacaba antes de la pelea de los guardias de
+            // la entrada - recien se sacaba despues, en SCENARIO_EVENT_FIND_ROKHAN - asi que
+            // ambos companeros se quedaban quietos durante la pelea inicial y el jugador tenia
+            // que pelearla solo (confirmado contra material de retail: ambos aliados pelean
+            // desde el principio). Se saca aca (mismo callback con delay que el resto de la
+            // introduccion, para asegurar que ambas criaturas ya esten cargadas/resolubles via
+            // GetCreature para ese momento - llamarlo directo en OnPlayerEnter era demasiado
+            // pronto y GetRokhan()/GetThalyssra() devolvian null) para que puedan pelear desde
+            // el encuentro inicial en adelante; OnCreatureGroupWipe(SUMMON_GROUP_GUARD_ENTRANCE)
+            // ya se lo vuelve a poner a Rokhan despues para su desvio en sigilo en solitario,
+            // asi que ese toggle posterior queda intacto.
+            ClearAllyCombatImmunity();
         });
     }
 
@@ -73,6 +126,11 @@ struct scenario_stormwind_extraction : public InstanceScript
 
             SummonCreatureGroup(SUMMON_GROUP_GUARD_ENTRANCE);
             SummonCreatureGroup(SUMMON_GROUP_GUARD_FIRST_ROOM);
+
+            // Rokhan/Thalyssra are despawned/re-summoned fresh here (SUMMON_GROUP_INSIDE_PRISON),
+            // which resets UNIT_FLAG_IMMUNE_TO_NPC back to its creature_template default - see
+            // ClearAllyCombatImmunity() for why this needs clearing again on every re-summon.
+            ClearAllyCombatImmunity();
         }
         else if (type == SCENARIO_EVENT_FIND_ROKHAN)
         {
@@ -117,6 +175,7 @@ struct scenario_stormwind_extraction : public InstanceScript
                 DespawnCreatureGroup(SUMMON_GROUP_TALANJI_ZUL_PRISON);
 
                 SummonCreatureGroup(SUMMON_GROUP_ALL_AFTER_FREED);
+                ClearAllyCombatImmunity();
             });
 
             saurfang->GetScheduler().Schedule(22s, [this](TaskContext /*context*/)
@@ -209,6 +268,7 @@ struct scenario_stormwind_extraction : public InstanceScript
                 DespawnCreatureGroup(SUMMON_GROUP_ALL_AFTER_FREED);
                 SummonCreatureGroup(SUMMON_GROUP_END_HARBOR_HACKFIX);
                 SummonCreatureGroup(SUMMON_GROUP_END_HARBOR_JAINA);
+                ClearAllyCombatImmunity();
 
                 Creature* thalyssra = GetThalyssra();
                 if (!thalyssra)
@@ -278,6 +338,50 @@ private:
     Creature* GetTalanji()      { return GetCreature(NPC_TALANJI); }
     Creature* GetZul()          { return GetCreature(NPC_ZUL); }
     Creature* GetSaurfang()     { return GetCreature(NPC_SAURFANG); }
+
+    // EN: Rokhan and Thalyssra both have UNIT_FLAG_IMMUNE_TO_NPC set by default in
+    // creature_template, which blocks them from engaging the 7th Legion guards entirely.
+    // They also get despawned and re-summoned as brand new creatures (fresh default flags)
+    // at every stage transition (SUMMON_GROUP_LION_REST/INSIDE_PRISON/ALL_AFTER_FREED/
+    // END_HARBOR_HACKFIX in creature_summon_groups), so clearing the flag once is not enough -
+    // call this after every SummonCreatureGroup that includes them (confirmed against retail
+    // footage: both allies fight from the very start of every stage, not just the first).
+    // OnCreatureGroupWipe(SUMMON_GROUP_GUARD_ENTRANCE) re-applies it to Rokhan afterwards for
+    // his solo-stealth detour, and SCENARIO_EVENT_FIND_ROKHAN clears it again - that toggle
+    // pair is untouched by this helper.
+    // ES: Rokhan y Thalyssra tienen UNIT_FLAG_IMMUNE_TO_NPC puesto por defecto en
+    // creature_template, lo que les impide pelear contra los guardias del 7th Legion por
+    // completo. Ademas se despawnean y re-summonean como criaturas nuevas (flags por defecto
+    // de nuevo) en cada transicion de etapa (SUMMON_GROUP_LION_REST/INSIDE_PRISON/
+    // ALL_AFTER_FREED/END_HARBOR_HACKFIX en creature_summon_groups), asi que sacar el flag una
+    // sola vez no alcanza - se llama despues de cada SummonCreatureGroup que los incluya
+    // (confirmado contra material de retail: ambos aliados pelean desde el arranque de cada
+    // etapa, no solo la primera). OnCreatureGroupWipe(SUMMON_GROUP_GUARD_ENTRANCE) se lo vuelve
+    // a poner a Rokhan despues para su desvio en sigilo en solitario, y
+    // SCENARIO_EVENT_FIND_ROKHAN lo saca de nuevo - ese par de toggles queda intacto por este
+    // helper.
+    void ClearAllyCombatImmunity()
+    {
+        if (Creature* rokhan = GetRokhan())
+        {
+            TC_LOG_INFO("scripts", "DEBUG-SEALLIES: Rokhan found guid=%s reactState=%d immuneToNpcBefore=%d",
+                rokhan->GetGUID().ToString().c_str(), int32(rokhan->GetReactState()), rokhan->HasUnitFlag(UNIT_FLAG_IMMUNE_TO_NPC));
+            rokhan->RemoveUnitFlag(UNIT_FLAG_IMMUNE_TO_NPC);
+            TC_LOG_INFO("scripts", "DEBUG-SEALLIES: Rokhan immuneToNpcAfter=%d", rokhan->HasUnitFlag(UNIT_FLAG_IMMUNE_TO_NPC));
+        }
+        else
+            TC_LOG_INFO("scripts", "DEBUG-SEALLIES: ClearAllyCombatImmunity - GetRokhan() returned null");
+
+        if (Creature* thalyssra = GetThalyssra())
+        {
+            TC_LOG_INFO("scripts", "DEBUG-SEALLIES: Thalyssra found guid=%s reactState=%d immuneToNpcBefore=%d",
+                thalyssra->GetGUID().ToString().c_str(), int32(thalyssra->GetReactState()), thalyssra->HasUnitFlag(UNIT_FLAG_IMMUNE_TO_NPC));
+            thalyssra->RemoveUnitFlag(UNIT_FLAG_IMMUNE_TO_NPC);
+            TC_LOG_INFO("scripts", "DEBUG-SEALLIES: Thalyssra immuneToNpcAfter=%d", thalyssra->HasUnitFlag(UNIT_FLAG_IMMUNE_TO_NPC));
+        }
+        else
+            TC_LOG_INFO("scripts", "DEBUG-SEALLIES: ClearAllyCombatImmunity - GetThalyssra() returned null");
+    }
 };
 
 void AddSC_scenario_stormwind_extraction()

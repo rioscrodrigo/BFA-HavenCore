@@ -15361,7 +15361,20 @@ void Player::PrepareGossipMenu(WorldObject* source, uint32 menuId /*= 0*/, bool 
         bool canTalk = true;
         if (Creature* creature = source->ToCreature())
         {
-            if (!(itr->second.OptionNpcFlag & npcflags))
+            // EN: OptionNpcFlag=0 means "no npcflag requirement" (plain gossip text) - 646
+            // gossip_menu_option rows in this DB use it. Without this guard, `0 & npcflags`
+            // is always 0, so every one of those options was silently filtered out and never
+            // shown, no matter the creature's actual npcflags. Found while debugging Magni
+            // Bronzebeard (136907, menu 22537) never offering his real "I'm ready..." option
+            // (OptionNpcFlag=0) - only his flavor-text option (OptionNpcFlag=1) ever appeared.
+            // ES: OptionNpcFlag=0 significa "sin requisito de npcflag" (texto de gossip comun)
+            // - 646 filas de gossip_menu_option en esta DB lo usan. Sin esta guarda,
+            // `0 & npcflags` siempre da 0, asi que cada una de esas opciones se filtraba en
+            // silencio y nunca se mostraba, sin importar el npcflag real de la criatura.
+            // Encontrado depurando a Magni Bronzebeard (136907, menu 22537), que nunca
+            // ofrecia su opcion real "I'm ready..." (OptionNpcFlag=0) - solo aparecia la
+            // opcion de relleno (OptionNpcFlag=1).
+            if (itr->second.OptionNpcFlag && !(itr->second.OptionNpcFlag & npcflags))
                 continue;
 
             switch (itr->second.OptionType)
@@ -15402,6 +15415,20 @@ void Player::PrepareGossipMenu(WorldObject* source, uint32 menuId /*= 0*/, bool 
                 case GOSSIP_OPTION_QUESTGIVER:
                     canTalk = false;
                     break;
+                // EN: GOSSIP_OPTION_NONE (0) is the "no npcflag requirement" plain-text type -
+                // 646 gossip_menu_option rows in this DB use OptionType=0 (Magni Bronzebeard's
+                // real "I'm ready..." line, menu 22537, among them). It was missing from this
+                // no-checks group, so it fell to `default:` below and got silently treated as
+                // an "unknown gossip option" (canTalk=false) - same root cause family as the
+                // OptionNpcFlag=0 fix above, found while debugging the same NPC.
+                // ES: GOSSIP_OPTION_NONE (0) es el tipo de texto plano "sin requisito de
+                // npcflag" - 646 filas de gossip_menu_option en esta DB usan OptionType=0
+                // (entre ellas, la linea real "I'm ready..." de Magni Bronzebeard, menu 22537).
+                // Faltaba en este grupo sin chequeos, asi que caia al `default:` de abajo y se
+                // trataba en silencio como "opcion de gossip desconocida" (canTalk=false) -
+                // misma familia de causa raiz que el fix de OptionNpcFlag=0 de arriba,
+                // encontrado depurando el mismo NPC.
+                case GOSSIP_OPTION_NONE:
                 case GOSSIP_OPTION_GOSSIP:
                 case GOSSIP_OPTION_TRAINER:
                 case GOSSIP_OPTION_SPIRITGUIDE:
@@ -30943,6 +30970,8 @@ void Player::SendCustomMessage(std::string const& opcode, std::vector<std::strin
 
 void Player::PlayConversation(uint32 conversationId)
 {
+    TC_LOG_INFO("scripts", "DEBUG-CURSORBUG: Player '%s' (%s) PlayConversation conversationId=%u",
+        GetName().c_str(), GetGUID().ToString().c_str(), conversationId);
     Conversation::CreateConversation(conversationId, this, GetPosition(), { GetGUID() });
 }
 

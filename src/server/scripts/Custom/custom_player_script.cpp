@@ -19,11 +19,13 @@
 #include "Creature.h"
 #include "DatabaseEnv.h"
 #include "DBCEnums.h"
+#include "Log.h"
 #include "MapManager.h"
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "ScriptedGossip.h"
 #include "ScriptMgr.h"
+#include "SpellAuraEffects.h"
 #include "World.h"
 #include "WorldSession.h"
 #include "Chat.h"
@@ -377,10 +379,54 @@ public:
     int QUEST_WOLFSOFFENSIVE_A = 56031;
     int QUEST_WARCHIEFSORDER_H = 56030;
 
+    // EN: OnLevelChanged alone only fires once, exactly when crossing the 120 threshold - a
+    // player who already has this quest abandoned (or never got it for any other reason)
+    // never crosses that threshold again, so it could never be re-granted. Mirrors the
+    // OnLogin+OnLevelChanged pattern already used by the sibling OnBfaArrival class (same
+    // "temp fix" family) so it self-heals on every login instead.
+    // ES: OnLevelChanged solo se dispara una vez, exactamente al cruzar el umbral de nivel
+    // 120 - un jugador que ya abandono esta quest (o nunca la recibio por cualquier otro
+    // motivo) nunca vuelve a cruzar ese umbral, asi que nunca se le podria volver a otorgar.
+    // Replica el patron OnLogin+OnLevelChanged que ya usa la clase hermana OnBfaArrival
+    // (misma familia de "temp fix") para que se autorepare en cada login.
+    void OnLogin(Player* player, bool /*firstLogin*/) override
+    {
+        if (player->getLevel() >= 120)
+            GrantQuest(player);
+    }
+
     void OnLevelChanged(Player* player, uint8 oldLevel) override
     {
         if (oldLevel < 120 && player->getLevel() >= 120)
-            if (const Quest* quest = sObjectMgr->GetQuestTemplate(player->IsInAlliance() ? QUEST_WOLFSOFFENSIVE_A : QUEST_WARCHIEFSORDER_H))
+            GrantQuest(player);
+    }
+
+    // EN: Reverted back to the silent AddQuest after trying to show a real accept popup
+    // instead (SendQuestGiverQuestDetails, first with GetInteractionData().SourceGuid +
+    // displayPopup=true, then with the engine's own proven HandlePushQuestToParty pattern -
+    // SetDivider + displayPopup=false). Neither worked: the client rejected the popup outright
+    // with a "War Campaign" message saying to complete the "Lost Honor" questline first
+    // (starting with "The Dark Lady Calls" in Dazar'alor) - the client tracks real War
+    // Campaign chapter progression itself and refuses to let this quest be offered out of
+    // sequence. Neither "The Dark Lady Calls" nor "Lost Honor" exist anywhere in this world DB
+    // - they were never imported. Plan: implement that real prerequisite chain, then remove
+    // this AddQuest hack once the client accepts the natural progression. See TODO.md.
+    // ES: Se revirtio al AddQuest silencioso despues de intentar mostrar un popup real de
+    // aceptar (SendQuestGiverQuestDetails, primero con GetInteractionData().SourceGuid +
+    // displayPopup=true, despues con el patron ya probado del motor de
+    // HandlePushQuestToParty - SetDivider + displayPopup=false). Ninguno funciono: el cliente
+    // rechazo el popup directamente con un mensaje de "War Campaign" pidiendo completar la
+    // questline "Lost Honor" primero (empezando por "The Dark Lady Calls" en Dazar'alor) - el
+    // cliente rastrea el progreso real de capitulos de la War Campaign el mismo y se niega a
+    // que se ofrezca esta quest fuera de secuencia. Ni "The Dark Lady Calls" ni "Lost Honor"
+    // existen en ningun lado de esta world DB - nunca se importaron. Plan: implementar esa
+    // cadena real de prerequisitos, y despues sacar este hack de AddQuest una vez que el
+    // cliente acepte la progresion natural. Ver TODO.md.
+    void GrantQuest(Player* player)
+    {
+        int questId = player->IsInAlliance() ? QUEST_WOLFSOFFENSIVE_A : QUEST_WARCHIEFSORDER_H;
+        if (player->GetQuestStatus(questId) == QUEST_STATUS_NONE)
+            if (const Quest* quest = sObjectMgr->GetQuestTemplate(questId))
                 player->AddQuest(quest, nullptr);
     }
 };
@@ -551,9 +597,32 @@ public:
 };
 
 
+// TEMP DIAGNOSTIC - remove once the Stormwind Extraction relog cursor bug is root-caused.
+// Dumps scene-aura state on every login so we can see whether a SPELL_AURA_PLAY_SCENE aura
+// (or the loading flag) is present at the moment the client reports the broken cursor.
+class DiagnosticCursorBugOnLogin : public PlayerScript
+{
+public:
+    DiagnosticCursorBugOnLogin() : PlayerScript("DiagnosticCursorBugOnLogin") { }
+
+    void OnLogin(Player* player, bool /*firstLogin*/) override
+    {
+        Player::AuraEffectList const& sceneAuras = player->GetAuraEffectsByType(SPELL_AURA_PLAY_SCENE);
+        TC_LOG_INFO("scripts", "DEBUG-CURSORBUG: OnLogin player='%s' (%s) map=%u pos=(%.2f,%.2f,%.2f) playerLoading=%d activeSceneAuraCount=%u",
+            player->GetName().c_str(), player->GetGUID().ToString().c_str(), player->GetMapId(),
+            player->GetPositionX(), player->GetPositionY(), player->GetPositionZ(),
+            player->GetSession()->PlayerLoading(), uint32(sceneAuras.size()));
+
+        for (AuraEffect const* eff : sceneAuras)
+            TC_LOG_INFO("scripts", "DEBUG-CURSORBUG: OnLogin player='%s' has SPELL_AURA_PLAY_SCENE from spell=%u sceneId(miscValue)=%d",
+                player->GetName().c_str(), eff->GetId(), eff->GetMiscValue());
+    }
+};
+
 void AddSC_custom_player_script()
 {
     RegisterPlayerScript(playerscript_recruiter);
+    RegisterPlayerScript(DiagnosticCursorBugOnLogin); // TEMP DIAGNOSTIC - see class comment
     //RegisterPlayerScript(OnLegionArrival);          // TEMP FIX! Quest 40519 and 43926 - "legion returns". remove it when legion start quests are properly fixed
     //RegisterPlayerScript(On110Arrival);             // TEMP FIX! Quest 43341 - "uniting the isles".
     RegisterPlayerScript(OnBfaArrival);             // TEMP FIX! remove it when lordaeron battle is properly fixed.

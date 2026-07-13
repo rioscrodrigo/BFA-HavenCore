@@ -1388,14 +1388,95 @@ struct npc_magni_bronzebeard_silithus : public ScriptedAI
     }
 };
 
+enum WoundMending
+{
+    SPELL_AZERITE_EXPLOSION     = 271748,
+    SPELL_MAIN                  = 278756,
+};
+
 // 136907 - Magni Bronzebeard
 struct npc_magni_bronzebeard_heart_chamber : public ScriptedAI
 {
     npc_magni_bronzebeard_heart_chamber(Creature* creature) : ScriptedAI(creature) { }
 
-    void sGossipSelect(Player* player, uint32 /*menuId*/, uint32 /*gossipListId*/) override
-    {       
-        player->CastSpell(player, 268798, true);
+    // EN: Spell 268798 really does trigger the minigame scene via a SPELL_AURA_PLAY_SCENE
+    // (aura type 430) effect - confirmed with `.debug spelleffects 268798` (see cs_debug.cpp)
+    // and cross-checked against the live client-data on wago.tools/db2. Its EffectMiscValue is
+    // 1946 - that's the actual SceneId, NOT 3046 as this file's own comment assumed. The
+    // scene_get_heart_of_azeroth script/timing (38s window, removes the 268798 aura, cancels
+    // the scene) was already correct for this minigame, it was just wired in DB to the wrong
+    // SceneId (scene_template had ScriptName='scene_get_heart_of_azeroth' on SceneId 3046
+    // instead of 1946, which had no ScriptName at all) - fixed via
+    // sql/updates/db_world/2026_07_11_03.sql. No C++ workaround needed here anymore; casting
+    // 268798 now starts the real scene 1946 on its own.
+    // ES: El hechizo 268798 si dispara la escena del minijuego, via un efecto
+    // SPELL_AURA_PLAY_SCENE (aura tipo 430) - confirmado con `.debug spelleffects 268798`
+    // (ver cs_debug.cpp) y cruzado con los datos reales del cliente en wago.tools/db2. Su
+    // EffectMiscValue es 1946 - ese es el SceneId real, NO 3046 como asumia el comentario de
+    // este archivo. El script/timing de scene_get_heart_of_azeroth (ventana de 38s, saca el
+    // aura de 268798, cancela la escena) ya estaba bien para este minijuego, solo estaba
+    // conectado en la DB al SceneId equivocado (scene_template tenia
+    // ScriptName='scene_get_heart_of_azeroth' en el SceneId 3046 en vez del 1946, que no
+    // tenia ningun ScriptName) - arreglado via sql/updates/db_world/2026_07_11_03.sql. Ya no
+    // hace falta ningun workaround en C++ aca; castear 268798 ahora arranca la escena real
+    // 1946 sola.
+    // EN: gossipListId 0 = "Magni, I'm ready for you to empower the Heart of Azeroth." (the
+    // real trigger, OptionNpcFlag=0 - was never selectable until the OptionNpcFlag filtering
+    // bug in Player::PrepareGossipMenu was fixed, see Player.cpp). gossipListId 1 = "What does
+    // Azeroth want of me, Magni?" (flavor-only line, OptionNpcFlag=1 - this is the one that
+    // was accidentally being used for every earlier test since it was the only one visible).
+    // Only option 0 should start the ritual/scene and grant the seal credit.
+    // ES: gossipListId 0 = "Magni, I'm ready for you to empower the Heart of Azeroth." (el
+    // disparador real, OptionNpcFlag=0 - nunca fue seleccionable hasta arreglar el bug de
+    // filtrado de OptionNpcFlag en Player::PrepareGossipMenu, ver Player.cpp). gossipListId 1
+    // = "What does Azeroth want of me, Magni?" (linea de relleno, OptionNpcFlag=1 - la que se
+    // uso sin querer en todas las pruebas anteriores por ser la unica visible). Solo la opcion
+    // 0 debe arrancar el ritual/escena y otorgar el credito del sello.
+    void sGossipSelect(Player* player, uint32 menuId, uint32 gossipListId) override
+    {
+        if (gossipListId != 0)
+        {
+            CloseGossipMenuFor(player);
+            return;
+        }
+
+        // EN: Same dialogue line serves two different moments: the FIRST time (wounds not
+        // absorbed yet, quest_objectives StorageIndex 0 / entry 141870 progress < 5) it starts
+        // the ritual - casts 268798, which plays the intro scene (1946) and spawns/enables the
+        // Azerite Wounds. Once all 5 wounds are already absorbed, clicking it again is the
+        // return-to-Magni "seal it" moment - it should NOT replay the intro scene again;
+        // instead it grants the "mend the seal" kill-credit (136907, quest_objectives ID
+        // 341314) and plays the closing channel (SPELL_MAIN/278756, real non-triggered cast so
+        // the client shows its channel bar - see GrantWoundCredit's sibling comment). Spell
+        // 268798's client data does have a 2nd SPELL_EFFECT_KILL_CREDIT effect (MiscValue
+        // 136907) that in real retail probably only fires meaningfully on this 2nd visit, but
+        // this fork's bundled ClientData/dbc doesn't apply it at all (confirmed via
+        // wago.tools/db2), so it's granted explicitly here instead.
+        // ES: La misma linea de dialogo sirve para dos momentos distintos: la PRIMERA vez (las
+        // heridas no fueron absorbidas todavia, quest_objectives StorageIndex 0 / entry 141870
+        // con progreso < 5) arranca el ritual - castea 268798, que reproduce la escena de
+        // intro (1946) y aparecen/habilitan las Azerite Wounds. Una vez absorbidas las 5
+        // heridas, volver a clickearla es el momento de "volver a Magni a sellar" - NO debe
+        // repetir la escena de intro; en cambio otorga el credito de "mend the seal" (136907,
+        // quest_objectives ID 341314) y reproduce la canalizacion de cierre (SPELL_MAIN/278756,
+        // cast real no-triggered para que el cliente muestre la barra de canalizacion - ver el
+        // comentario hermano en GrantWoundCredit). Los datos de cliente del hechizo 268798 si
+        // tienen un 2do efecto SPELL_EFFECT_KILL_CREDIT (MiscValue 136907) que en retail real
+        // probablemente solo dispara con sentido en esta 2da visita, pero el ClientData/dbc de
+        // este fork no lo aplica en absoluto (confirmado via wago.tools/db2), asi que se otorga
+        // explicito aca.
+        Quest const* quest = sObjectMgr->GetQuestTemplate(52428);
+        bool woundsAbsorbed = quest && player->GetQuestObjectiveData(quest, 0) >= 5;
+
+        if (quest && player->GetQuestStatus(52428) == QUEST_STATUS_INCOMPLETE && woundsAbsorbed)
+        {
+            player->KilledMonsterCredit(136907);
+            player->CastSpell(player, SPELL_MAIN, false);
+        }
+        else
+        {
+            player->CastSpell(player, 268798, true);
+        }
     }
 
     void sQuestAccept(Player* player, Quest const* quest) override
@@ -1408,7 +1489,9 @@ struct npc_magni_bronzebeard_heart_chamber : public ScriptedAI
     }
 };
 
-//3046
+// 1946 - real SceneId triggered by spell 268798's SPELL_AURA_PLAY_SCENE effect (was wired to
+// the wrong SceneId 3046 in scene_template - see sGossipSelect comment above and
+// sql/updates/db_world/2026_07_11_03.sql)
 class scene_get_heart_of_azeroth : public SceneScript
 {
 public:
@@ -1419,7 +1502,7 @@ public:
         player->GetScheduler().Schedule(38s, [player] (TaskContext context)
         {
             player->RemoveAurasDueToSpell(268798);
-            player->GetSceneMgr().CancelSceneBySceneId(3046);
+            player->GetSceneMgr().CancelSceneBySceneId(1946);
         });
     }
 };
@@ -1434,12 +1517,6 @@ struct go_azeroth_heart_chamber_titan_console : public GameObjectAI
         player->CastSpell(player, 270537, true); // Azeroth Stabbed
         return false;
     }
-};
-
-enum WoundMending
-{
-    SPELL_AZERITE_EXPLOSION     = 271748,
-    SPELL_MAIN                  = 278756,
 };
 
 // 141870 - Azerite Wound
@@ -1457,33 +1534,72 @@ struct npc_azeroth_heart_chamber_azerite_wound : public ScriptedAI
         });
     }
 
+    // EN: Shared by both SpellHit (the intended flow: player presses the Heart of Azeroth
+    // extra action button, which casts spell 267913 at this wound) and OnSpellClick (a
+    // fallback wired via npc_spellclick_spells - the client apparently pre-validates 267913's
+    // TARGET_UNIT_NEARBY_ENTRY implicit target itself before sending the cast, and refuses to
+    // send it even with a valid server-side `conditions` row and a target selected, even
+    // though `.cast 267913` from a GM works perfectly since it skips client-side
+    // pre-validation entirely. Rather than fight the client, players can also just click the
+    // wound directly like the "Countermeasures" NPCs elsewhere in this fork.
+    // ES: Compartido entre SpellHit (el flujo esperado: el jugador presiona el boton de
+    // accion extra del Heart of Azeroth, que castea el hechizo 267913 contra esta herida) y
+    // OnSpellClick (un respaldo cableado via npc_spellclick_spells - el cliente parece
+    // pre-validar el target implicito TARGET_UNIT_NEARBY_ENTRY de 267913 el mismo antes de
+    // mandar el cast, y se niega a mandarlo aunque haya una fila valida en `conditions` del
+    // lado del servidor y un target seleccionado, a pesar de que `.cast 267913` desde un GM
+    // funciona perfecto porque se salta la prevalidacion del cliente por completo. En vez de
+    // pelear contra el cliente, los jugadores tambien pueden simplemente clickear la herida
+    // directo, igual que los NPCs "Countermeasures" en otra parte de este fork.
+    void GrantWoundCredit(Player* pCaster)
+    {
+        pCaster->KilledMonsterCredit(me->GetEntry());
+
+        if (GameObject* rock = me->FindNearestGameObject(294030, 5.f))
+            rock->SetAnimKitId(16292, false);
+
+        if (Quest const* quest = sObjectMgr->GetQuestTemplate(52428))
+        {
+            if (pCaster->IsQuestObjectiveProgressComplete(quest))
+            {
+                pCaster->RemoveAurasDueToSpell(275824);
+                pCaster->CastSpell(pCaster, 271184, true);
+
+                // EN: The closing channel (azerite beam + channel bar, SPELL_MAIN/278756 cast
+                // for real/non-triggered) now lives in npc_magni_bronzebeard_heart_chamber's
+                // sGossipSelect instead of here - it's the "return to Magni once wounds are
+                // done" moment, not something that fires automatically at the last wound's
+                // death (which could be anywhere in the room, not matching the retail
+                // reference of the character standing alone at the center).
+                // ES: La canalizacion de cierre (haz de azerita + barra, cast real/no-triggered
+                // de SPELL_MAIN/278756) ahora vive en el sGossipSelect de
+                // npc_magni_bronzebeard_heart_chamber en vez de aca - es el momento de "volver
+                // a hablarle a Magni una vez terminadas las heridas", no algo que dispare solo
+                // al morir la ultima herida (que puede estar en cualquier parte de la sala, sin
+                // coincidir con la referencia de retail del personaje solo parado en el centro).
+            }
+        }
+
+        me->GetScheduler().CancelAll();
+        me->GetScheduler().Schedule(20s, [](TaskContext context)
+        {
+            if (GameObject* rock = GetContextUnit()->FindNearestGameObject(294030, 5.f))
+                rock->SetAnimKitId(2664, false);
+
+            GetContextCreature()->AI()->Reset();
+        });
+    }
+
     void SpellHit(Unit* caster, SpellInfo const* /*spell*/) override
     {
         if (Player* pCaster = caster->ToPlayer())
-        {
-            pCaster->KilledMonsterCredit(me->GetEntry());
+            GrantWoundCredit(pCaster);
+    }
 
-            if (GameObject* rock = me->FindNearestGameObject(294030, 5.f))
-                rock->SetAnimKitId(16292, false);
-
-            if (Quest const* quest = sObjectMgr->GetQuestTemplate(52428))
-            {
-                if (pCaster->IsQuestObjectiveProgressComplete(quest))
-                {
-                    pCaster->RemoveAurasDueToSpell(275824);
-                    pCaster->CastSpell(pCaster, 271184, true);
-                }
-            }
-
-            me->GetScheduler().CancelAll();
-            me->GetScheduler().Schedule(20s, [](TaskContext context)
-            {
-                if (GameObject* rock = GetContextUnit()->FindNearestGameObject(294030, 5.f))
-                    rock->SetAnimKitId(2664, false);
-
-                GetContextCreature()->AI()->Reset();
-            });
-        }
+    void OnSpellClick(Unit* clicker, bool& /*result*/) override
+    {
+        if (Player* pCaster = clicker->ToPlayer())
+            GrantWoundCredit(pCaster);
     }
 };
 
@@ -1633,6 +1749,7 @@ enum
     KILLED_MONSTER_CREDIT_A_RECENT_DISCOVERY = 132290, //KILLED_MONSTER_CREDIT_A_RECENT_DISCOVERY
     PHASE_AFTER_QUEST = 10186,
     SCENE_THE_POWER_IN_OUR_HANDS = 263099,
+    PHASE_NATHANOS_ORGRIMMAR = 10401, // matches creature.PhaseId on npc_nathanos_blightcaller_132254's Orgrimmar spawn
 };
 
 class On110Silithus : public PlayerScript
@@ -1697,6 +1814,24 @@ public:
             if (player->GetZoneId() == 1377 && player->GetAreaId() == 9310)
                 PhasingHandler::AddPhase(player, PHASE_AFTER_QUEST, true);
         }
+
+        // EN: Nathanos Blightcaller's Orgrimmar spawn (132254, "Summons to Orgrimmar"
+        // follow-up) had creature.PhaseId=0 (visible to everyone) even though this file's own
+        // comment above that script ("PHASE 10401") shows a phase was intended - nothing ever
+        // granted it, so he showed up for every player regardless of quest state (reported as
+        // "Nathanos appears twice" in Orgrimmar, alongside the unrelated Battle for Azeroth
+        // intro campaign Nathanos). Gate the phase on exactly the same quest check the NPC's
+        // own script already uses (HasQuest(QUEST_SUMMONS_TO_ORGRIMMAR)).
+        // ES: El spawn de Nathanos Blightcaller en Orgrimmar (132254, seguimiento de "Summons
+        // to Orgrimmar") tenia creature.PhaseId=0 (visible para cualquiera) a pesar de que el
+        // propio comentario de este archivo arriba de ese script ("PHASE 10401") mostraba que
+        // se penso usar una fase - nunca se le otorgo a nadie, asi que aparecia para cualquier
+        // jugador sin importar el estado de la quest (reportado como "Nathanos aparece dos
+        // veces" en Orgrimmar, junto al Nathanos - sin relacion - de la campana de introduccion
+        // de Battle for Azeroth). Se activa la fase con el mismo chequeo de quest que ya usa el
+        // propio script del NPC (HasQuest(QUEST_SUMMONS_TO_ORGRIMMAR)).
+        if (player->HasQuest(QUEST_SUMMONS_TO_ORGRIMMAR))
+            PhasingHandler::AddPhase(player, PHASE_NATHANOS_ORGRIMMAR, true);
     }
 };
 

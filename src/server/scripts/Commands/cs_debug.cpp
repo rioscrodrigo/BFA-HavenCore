@@ -42,6 +42,8 @@ EndScriptData */
 #include "ObjectMgr.h"
 #include "PhasingHandler.h"
 #include "RBAC.h"
+#include "SpellInfo.h"
+#include "SpellMgr.h"
 #include "SpellPackets.h"
 #include "Transport.h"
 #include "World.h"
@@ -95,6 +97,7 @@ public:
             { "play",          rbac::RBAC_PERM_COMMAND_DEBUG_PLAY,          false, nullptr,                             "", debugPlayCommandTable },
             { "send",          rbac::RBAC_PERM_COMMAND_DEBUG_SEND,          false, nullptr,                             "", debugSendCommandTable },
             { "setaurastate",  rbac::RBAC_PERM_COMMAND_DEBUG_SETAURASTATE,  false, &HandleDebugSetAuraStateCommand,     "" },
+            { "spelleffects",  rbac::RBAC_PERM_COMMAND_DEBUG_SEND_SPELLFAIL, false, &HandleDebugSpellEffectsCommand,     "" },
             { "spawnvehicle",  rbac::RBAC_PERM_COMMAND_DEBUG_SPAWNVEHICLE,  false, &HandleDebugSpawnVehicleCommand,     "" },
             { "setvid",        rbac::RBAC_PERM_COMMAND_DEBUG_SETVID,        false, &HandleDebugSetVehicleIdCommand,     "" },
             { "entervehicle",  rbac::RBAC_PERM_COMMAND_DEBUG_ENTERVEHICLE,  false, &HandleDebugEnterVehicleCommand,     "" },
@@ -252,6 +255,53 @@ public:
         castFailed.FailedArg1 = failArg1;
         castFailed.FailedArg2 = failArg2;
         handler->GetSession()->SendPacket(castFailed.Write());
+
+        return true;
+    }
+
+    // EN: Permanent debug command - ".debug spelleffects <spellId>" prints a spell's effect
+    // list (SpellEffectName, aura type, misc values, trigger spell, base points) straight to
+    // the GM's chat window, reading the same in-memory client-data (DB2) this server already
+    // loaded at boot via sSpellMgr. Added because there's no other way to inspect a spell's
+    // real effects on this fork short of a binary DB2 reader (the client-data/*.db2 files are
+    // WDB6 binary, not readable/greppable as text) - this reuses the server's own already-
+    // parsed copy of that data instead. Once compiled, works for ANY spell ID from then on
+    // with no further recompiles - use this instead of adding one-off TC_LOG_INFO calls next
+    // to a CastSpell() just to see what a spell actually does.
+    // ES: Comando de debug permanente - ".debug spelleffects <spellId>" imprime la lista de
+    // efectos de un hechizo (SpellEffectName, tipo de aura, valores misc, trigger spell,
+    // base points) directo en el chat del GM, leyendo los mismos datos del cliente (DB2) que
+    // este servidor ya cargo en memoria al arrancar via sSpellMgr. Se agrego porque no hay
+    // otra forma de inspeccionar los efectos reales de un hechizo en este fork sin un lector
+    // binario de DB2 (los archivos client-data/*.db2 son binarios WDB6, no se pueden leer/
+    // grepear como texto) - esto reusa la copia que el servidor ya parseo en vez de eso. Una
+    // vez compilado, funciona para CUALQUIER spell ID de ahi en mas sin recompilar de nuevo -
+    // usar esto en vez de agregar TC_LOG_INFO sueltos al lado de un CastSpell() solo para ver
+    // que hace un hechizo.
+    static bool HandleDebugSpellEffectsCommand(ChatHandler* handler, char const* args)
+    {
+        if (!*args)
+        {
+            handler->PSendSysMessage("Usage: .debug spelleffects #spellid");
+            return false;
+        }
+
+        uint32 spellId = (uint32)atoi(args);
+        SpellInfo const* spellInfo = sSpellMgr->GetSpellInfo(spellId);
+        if (!spellInfo)
+        {
+            handler->PSendSysMessage("Spell %u not found (missing/broken client-data, or wrong ID).", spellId);
+            return true;
+        }
+
+        handler->PSendSysMessage("Spell %u: %s", spellId, spellInfo->SpellName ? (*spellInfo->SpellName)[LOCALE_enUS] : "<no name>");
+        for (SpellEffectInfo const* eff : spellInfo->GetEffectsForDifficulty(DIFFICULTY_NONE))
+        {
+            if (!eff)
+                continue;
+            handler->PSendSysMessage("  eff[%u] Effect=%u ApplyAuraName=%u MiscValue=%d MiscValueB=%d BasePoints=%d TriggerSpell=%u",
+                eff->EffectIndex, eff->Effect, eff->ApplyAuraName, eff->MiscValue, eff->MiscValueB, eff->BasePoints, eff->TriggerSpell);
+        }
 
         return true;
     }

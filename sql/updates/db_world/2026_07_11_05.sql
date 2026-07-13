@@ -1,0 +1,24 @@
+-- EN: Root cause of "Infusing the Heart" (quest 52428) skipping its whole wound-absorbing
+-- minigame: its quest_template.QuestType was 0 (QUEST_TYPE_AUTOCOMPLETE), while every other
+-- quest in the same chain (50769, 51211, 51443, 52946, 53031) correctly uses 2
+-- (QUEST_TYPE_NORMAL) - an isolated data error on just this one quest. Per
+-- Quest::IsAutoComplete() (QuestDef.cpp), QUEST_TYPE_AUTOCOMPLETE makes
+-- Player::PrepareQuestMenu/SendPreparedQuest always list/offer the quest as already complete
+-- (icon 4, ready to turn in) the moment it's offered by a quest giver, completely bypassing
+-- actual objective progress (the scene, the extra action button, and hitting the 5 Azerite
+-- Wounds all worked correctly once fixed - this QuestType was the one remaining piece making
+-- it look instantly "done" regardless). Fixed to QUEST_TYPE_NORMAL (2) to match its siblings.
+--
+-- ES: Causa raiz de que "Infusing the Heart" (quest 52428) se saltara todo el minijuego de
+-- absorber heridas: su quest_template.QuestType era 0 (QUEST_TYPE_AUTOCOMPLETE), mientras que
+-- el resto de la cadena (50769, 51211, 51443, 52946, 53031) usa correctamente 2
+-- (QUEST_TYPE_NORMAL) - un error de datos aislado solo en esta quest. Segun
+-- Quest::IsAutoComplete() (QuestDef.cpp), QUEST_TYPE_AUTOCOMPLETE hace que
+-- Player::PrepareQuestMenu/SendPreparedQuest siempre listen/ofrezcan la quest como ya
+-- completa (icono 4, lista para entregar) apenas la ofrece un quest giver, saltandose por
+-- completo el progreso real de objetivos (la escena, el boton de accion extra, y golpear las
+-- 5 Azerite Wounds funcionaban bien una vez arregladas - este QuestType era la ultima pieza
+-- que la hacia parecer "lista" sin importar el progreso). Corregido a QUEST_TYPE_NORMAL (2)
+-- para que coincida con el resto de la cadena.
+
+UPDATE `quest_template` SET `QuestType` = 2 WHERE `ID` = 52428;

@@ -26,6 +26,7 @@
 #include "ScriptMgr.h"
 #include "CreatureAI.h"
 #include "ScriptedGossip.h"
+#include "PhasingHandler.h"
 #include "Pet.h"
 #include "PetAI.h"
 #include "Log.h"
@@ -835,8 +836,53 @@ public:
     }
 };
 
+enum ZuldazarPhases
+{
+    PHASE_NATHANOS_ZULDAZAR_HARBOR_ARRIVAL = 10402,
+};
+
+// EN: Two separate "Nathanos Blightcaller" spawns exist in Dazar'alor harbor at the same spot
+// (map 1642, zone 8499, area 8665): entry 121210 only offers the early arrival quests
+// (50769 "Stormwind Extraction", 51443 "Mission Statement"), while entry 135691 is the real
+// ongoing War Campaign hub (creature_queststarter/questender lists ~50 quests, including
+// "The Warchief's Order"). Neither had any PhaseId/condition, so both were always visible
+// together, unconditionally - reported as "Nathanos appears twice in Zuldazar, giving
+// different quests at the same time". Same root-cause family as the earlier Orgrimmar
+// Nathanos duplicate fix in zone_silithus.cpp (PHASE_NATHANOS_ORGRIMMAR) - gate the
+// arrival-only NPC (121210) to only show for players who still need it (haven't picked up
+// "Mission Statement" and haven't already finished "Stormwind Extraction"), matching how the
+// Orgrimmar case was resolved.
+// ES: Existen dos spawns separados de "Nathanos Blightcaller" en el puerto de Dazar'alor en el
+// mismo lugar (mapa 1642, zona 8499, area 8665): el entry 121210 solo ofrece las quests de
+// llegada temprana (50769 "Stormwind Extraction", 51443 "Mission Statement"), mientras que el
+// entry 135691 es el verdadero hub de la War Campaign en curso (creature_queststarter/
+// questender listan ~50 quests, incluida "The Warchief's Order"). Ninguno tenia PhaseId ni
+// condicion, asi que ambos aparecian siempre juntos, sin importar el progreso - reportado como
+// "Nathanos aparece dos veces en Zuldazar, dando distintas misiones al mismo tiempo". Misma
+// familia de causa raiz que el fix anterior del Nathanos duplicado de Orgrimmar en
+// zone_silithus.cpp (PHASE_NATHANOS_ORGRIMMAR) - se gatea el NPC de solo-llegada (121210) para
+// que aparezca unicamente a jugadores que todavia lo necesitan (no tomaron "Mission Statement"
+// y no terminaron ya "Stormwind Extraction"), igual que se resolvio el caso de Orgrimmar.
+class OnZuldazarHarborArrival : public PlayerScript
+{
+public:
+    OnZuldazarHarborArrival() : PlayerScript("OnZuldazarHarborArrival") { }
+
+    void OnLogin(Player* player, bool /*firstLogin*/) override
+    {
+        HandlePhase(player);
+    }
+
+    void HandlePhase(Player* player)
+    {
+        if (player->GetQuestStatus(51443) == QUEST_STATUS_NONE && player->GetQuestStatus(50769) != QUEST_STATUS_REWARDED)
+            PhasingHandler::AddPhase(player, PHASE_NATHANOS_ZULDAZAR_HARBOR_ARRIVAL, true);
+    }
+};
+
 void AddSC_zone_zuldazar()
 {
+    RegisterPlayerScript(OnZuldazarHarborArrival);
     RegisterCreatureAI(npc_talanji_arrival);
     RegisterCreatureAI(npc_talanji_arrival_escort);
     RegisterCreatureAI(npc_enforcer_pterrordax);

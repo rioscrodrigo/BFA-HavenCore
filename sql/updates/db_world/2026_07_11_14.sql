@@ -1,0 +1,21 @@
+-- EN: Restores QUEST_FLAGS_AUTO_ACCEPT (0x00080000) on "The Warchief's Order" (56030) and
+-- "The Wolf's Offensive" (56031), removed earlier today in 2026_07_11_09.sql when this quest
+-- was granted via a raw player->AddQuest() with no real trigger (that flag - "the client
+-- recognizes this flag as auto-accept" - made no sense without one, and caused the accept
+-- popup to re-show on every login). The delivery mechanism changed since then
+-- (custom_player_script.cpp's On120Arrival now calls SendQuestGiverQuestDetails with
+-- autoLaunched=true instead of AddQuest) - that's exactly the kind of real, client-recognized
+-- trigger this flag describes, so it needs to be back for the client to accept/display the
+-- auto-launched popup at all.
+--
+-- ES: Restaura QUEST_FLAGS_AUTO_ACCEPT (0x00080000) en "The Warchief's Order" (56030) y
+-- "The Wolf's Offensive" (56031), sacado antes hoy en 2026_07_11_09.sql cuando esta quest se
+-- otorgaba con un player->AddQuest() crudo sin ningun disparador real (ese flag - "el cliente
+-- reconoce esto como auto-accept" - no tenia sentido sin uno, y causaba que el popup de
+-- aceptar reapareciera en cada login). El mecanismo de entrega cambio desde entonces (el
+-- On120Arrival de custom_player_script.cpp ahora llama a SendQuestGiverQuestDetails con
+-- autoLaunched=true en vez de AddQuest) - eso es justo el tipo de disparador real y
+-- reconocido por el cliente que describe este flag, asi que hace falta que vuelva para que el
+-- cliente acepte/muestre el popup auto-lanzado.
+
+UPDATE `quest_template` SET `Flags` = `Flags` | 0x00080000 WHERE `ID` IN (56030, 56031);

@@ -1,0 +1,22 @@
+-- EN: Follow-up to 2026_07_11_02.sql. That fix cleared UNIT_FLAG_NOT_SELECTABLE from the
+-- Azerite Wound (entry 141870) but kept UNIT_FLAG_IMMUNE_TO_PC|IMMUNE_TO_NPC, assuming those
+-- only blocked normal melee/auto-attack. In practice the player still couldn't target it with
+-- the Heart of Azeroth ability even after the extra action button appeared (confirmed live) -
+-- IMMUNE_TO_PC/IMMUNE_TO_NPC gate Unit::_IsValidAttackTarget, which most offensive/targeted
+-- player spells (not just melee) rely on to decide whether a unit is a legal target at all.
+-- Clears unit_flags entirely (0) so the wound is a fully valid target for the quest ability.
+-- It's a stationary, non-aggressive prop with no real combat stats, so being technically
+-- meleeable by a player isn't a practical concern.
+--
+-- ES: Seguimiento a 2026_07_11_02.sql. Ese fix saco UNIT_FLAG_NOT_SELECTABLE de la Azerite
+-- Wound (entry 141870) pero dejo UNIT_FLAG_IMMUNE_TO_PC|IMMUNE_TO_NPC, asumiendo que esos
+-- solo bloqueaban el melee/auto-attack normal. En la practica el jugador seguia sin poder
+-- targetear con la habilidad del Heart of Azeroth aun con el boton de accion especial ya
+-- visible (confirmado en vivo) - IMMUNE_TO_PC/IMMUNE_TO_NPC controlan
+-- Unit::_IsValidAttackTarget, del que dependen la mayoria de los hechizos ofensivos/con
+-- target de jugador (no solo el melee) para decidir si una unidad es un objetivo legal.
+-- Se limpia unit_flags por completo (0) para que la herida sea un objetivo totalmente valido
+-- para la habilidad de la quest. Es un objeto estatico y no agresivo sin stats de combate
+-- reales, asi que ser tecnicamente atacable por un jugador no es un problema practico.
+
+UPDATE `creature_template` SET `unit_flags` = 0 WHERE `entry` = 141870;

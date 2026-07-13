@@ -1,0 +1,32 @@
+-- EN: Follow-up to the Orgrimmar "Nathanos/Sylvanas appear twice" report. Two fixes:
+-- 1) Remove an orphaned "Nathanos Blightcaller" spawn (guid 210119251, entry 133521) in
+--    Orgrimmar with no ScriptName, no smart_scripts, and no quest relations anywhere -
+--    dead placeholder content.
+-- 2) Apply PhaseId 10401 to the Silithus-story "Summons to Orgrimmar" Nathanos spawn
+--    (guid 300001801, entry 132254) - matches the file's own pre-existing
+--    "///-- PHASE 10401" comment in zone_silithus.cpp above npc_nathanos_blightcaller_132254,
+--    which was never actually applied to creature.PhaseId (was 0 = always visible to
+--    everyone). The matching phase-grant logic (tied to HasQuest(QUEST_SUMMONS_TO_ORGRIMMAR),
+--    same check the NPC's own script already uses) was added to On110Silithus::HandlePhase in
+--    the same C++ change. This is unrelated content from the Silithus/N'Zoth (patch 8.3)
+--    storyline, not part of the Battle for Azeroth launch campaign Nathanos (entry 140176)
+--    that was also being reported as a "duplicate".
+--
+-- ES: Seguimiento al reporte de "Nathanos/Sylvanas aparecen dos veces" en Orgrimmar. Dos
+-- fixes:
+-- 1) Elimina un spawn huerfano de "Nathanos Blightcaller" (guid 210119251, entry 133521) en
+--    Orgrimmar sin ScriptName, sin smart_scripts, y sin ninguna relacion de quest -
+--    contenido muerto sin proposito.
+-- 2) Aplica PhaseId 10401 al spawn de Nathanos de la historia de Silithus "Summons to
+--    Orgrimmar" (guid 300001801, entry 132254) - coincide con el comentario preexistente del
+--    propio archivo ("///-- PHASE 10401" en zone_silithus.cpp arriba de
+--    npc_nathanos_blightcaller_132254), que nunca se aplico de verdad a creature.PhaseId
+--    (estaba en 0 = visible para cualquiera siempre). La logica de otorgar esa fase (atada a
+--    HasQuest(QUEST_SUMMONS_TO_ORGRIMMAR), el mismo chequeo que ya usa el propio script del
+--    NPC) se agrego a On110Silithus::HandlePhase en el mismo cambio de C++. Este es contenido
+--    sin relacion de la historia de Silithus/N'Zoth (parche 8.3), no es parte del Nathanos de
+--    la campana de lanzamiento de Battle for Azeroth (entry 140176) que tambien se reportaba
+--    como "duplicado".
+
+DELETE FROM `creature` WHERE `guid` = 210119251;
+UPDATE `creature` SET `PhaseId` = 10401 WHERE `guid` = 300001801;

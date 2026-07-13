@@ -19,6 +19,7 @@
 #include "Chat.h"
 #include "DB2Stores.h"
 #include "Language.h"
+#include "Log.h"
 #include "ObjectMgr.h"
 #include "Player.h"
 #include "ScenePackets.h"
@@ -55,6 +56,10 @@ uint32 SceneMgr::PlaySceneByTemplate(SceneTemplate const sceneTemplate, Position
         transportGuid = &plrTransGuid;
 
     uint32 sceneInstanceID = GetNewStandaloneSceneInstanceID();
+
+    TC_LOG_INFO("scripts", "DEBUG-CURSORBUG: Player '%s' (%s) PlaySceneByTemplate sceneId=%u scenePackageId=%u sceneInstanceId=%u playbackFlags=%u",
+        GetPlayer()->GetName().c_str(), GetPlayer()->GetGUID().ToString().c_str(),
+        sceneTemplate.SceneId, sceneTemplate.ScenePackageId, sceneInstanceID, sceneTemplate.PlaybackFlags);
 
     if (_isDebuggingScenes)
         ChatHandler(GetPlayer()->GetSession()).PSendSysMessage(LANG_COMMAND_SCENE_DEBUG_PLAY, sceneInstanceID, sceneTemplate.ScenePackageId, sceneTemplate.PlaybackFlags);
@@ -117,6 +122,9 @@ void SceneMgr::OnSceneTrigger(uint32 sceneInstanceID, std::string const& trigger
 
 void SceneMgr::OnSceneCancel(uint32 sceneInstanceID)
 {
+    TC_LOG_INFO("scripts", "DEBUG-CURSORBUG: Player '%s' (%s) OnSceneCancel sceneInstanceId=%u hasScene=%d",
+        GetPlayer()->GetName().c_str(), GetPlayer()->GetGUID().ToString().c_str(), sceneInstanceID, HasScene(sceneInstanceID));
+
     if (!HasScene(sceneInstanceID))
         return;
 
@@ -144,6 +152,9 @@ void SceneMgr::OnSceneCancel(uint32 sceneInstanceID)
 
 void SceneMgr::OnSceneComplete(uint32 sceneInstanceID)
 {
+    TC_LOG_INFO("scripts", "DEBUG-CURSORBUG: Player '%s' (%s) OnSceneComplete sceneInstanceId=%u hasScene=%d",
+        GetPlayer()->GetName().c_str(), GetPlayer()->GetGUID().ToString().c_str(), sceneInstanceID, HasScene(sceneInstanceID));
+
     if (!HasScene(sceneInstanceID))
         return;
 

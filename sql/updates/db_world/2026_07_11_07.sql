@@ -1,0 +1,32 @@
+-- EN: Real root cause of "can't select the Azerite Wound" with the Heart of Azeroth ability
+-- (spell 267913, "Infusing the Heart" minigame). Its implicit target type is
+-- TARGET_UNIT_NEARBY_ENTRY (38) with TARGET_CHECK_ENTRY - per
+-- Spell::SelectImplicitNearbyTargets (Spell.cpp), that target type requires a matching
+-- `conditions` row of SourceTypeOrReferenceId=13 (CONDITION_SOURCE_TYPE_SPELL_IMPLICIT_TARGET)
+-- telling the engine WHICH nearby creature entry to auto-target; without it, the engine logs
+-- "no conditions entry for target with TARGET_CHECK_ENTRY... selecting default targets" and
+-- effectively finds nothing useful. This spell was never wired with that condition at all -
+-- unrelated to any of the unit_flags/unit_flags2/QuestType fixes already applied (those were
+-- real bugs too, just not this one). Uses ConditionType 31
+-- (CONDITION_OBJECT_ENTRY_GUID_LEGACY: TypeID=3/TYPEID_UNIT, entry=141870/Azerite Wound),
+-- matching the exact format of other working TARGET_UNIT_NEARBY_ENTRY conditions already in
+-- this DB. SourceGroup=1 is the effect bitmask (bit 0 = effect index 0, where the
+-- TARGET_UNIT_NEARBY_ENTRY implicit target actually lives on this spell).
+--
+-- ES: Causa raiz real de "no se puede seleccionar la Azerite Wound" con la habilidad Heart of
+-- Azeroth (hechizo 267913, minijuego de "Infusing the Heart"). Su tipo de target implicito es
+-- TARGET_UNIT_NEARBY_ENTRY (38) con TARGET_CHECK_ENTRY - segun
+-- Spell::SelectImplicitNearbyTargets (Spell.cpp), ese tipo de target necesita una fila en
+-- `conditions` con SourceTypeOrReferenceId=13 (CONDITION_SOURCE_TYPE_SPELL_IMPLICIT_TARGET)
+-- que le diga al motor QUE entry de criatura cercana auto-targetear; sin eso, el motor loguea
+-- "no conditions entry for target with TARGET_CHECK_ENTRY... selecting default targets" y en
+-- la practica no encuentra nada util. Este hechizo nunca tuvo esa condicion conectada - sin
+-- relacion con ninguno de los fixes de unit_flags/unit_flags2/QuestType ya aplicados (esos
+-- tambien eran bugs reales, solo que no este). Usa ConditionType 31
+-- (CONDITION_OBJECT_ENTRY_GUID_LEGACY: TypeID=3/TYPEID_UNIT, entry=141870/Azerite Wound),
+-- igual formato que otras condiciones TARGET_UNIT_NEARBY_ENTRY que ya funcionan en esta DB.
+-- SourceGroup=1 es la mascara de bits del efecto (bit 0 = indice de efecto 0, donde esta el
+-- target implicito TARGET_UNIT_NEARBY_ENTRY en este hechizo).
+
+INSERT INTO `conditions` (`SourceTypeOrReferenceId`, `SourceGroup`, `SourceEntry`, `SourceId`, `ElseGroup`, `ConditionTypeOrReference`, `ConditionTarget`, `ConditionValue1`, `ConditionValue2`, `ConditionValue3`, `NegativeCondition`, `ErrorType`, `ErrorTextId`, `ScriptName`, `Comment`)
+VALUES (13, 1, 267913, 0, 0, 31, 0, 3, 141870, 0, 0, 0, 0, '', 'Infusing the Heart - spell 267913 auto-targets nearby Azerite Wound (141870)');
