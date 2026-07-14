@@ -6,7 +6,7 @@ FROM ubuntu:24.04 AS build
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    build-essential gcc-13 g++-13 cmake ninja-build git ca-certificates pkg-config ccache \
+    build-essential gcc-13 g++-13 cmake ninja-build git ca-certificates pkg-config ccache mold \
     libboost-all-dev libmysqlclient-dev libssl-dev libbz2-dev libreadline-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -56,6 +56,8 @@ RUN --mount=type=cache,target=/build \
       -DWITHOUT_GIT=1 \
       -DCMAKE_C_COMPILER_LAUNCHER=ccache \
       -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+      -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold \
+      -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=mold \
       -DCMAKE_INSTALL_PREFIX=/opt/bfacore \
     && cmake --build /build -j"$JOBS" \
     && cmake --build /build --target install \

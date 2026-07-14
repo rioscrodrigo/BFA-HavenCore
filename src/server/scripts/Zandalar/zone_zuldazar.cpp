@@ -873,9 +873,59 @@ public:
         HandlePhase(player);
     }
 
+    // EN: PhasingHandler::OnAreaChange() (called unconditionally from Player::UpdateArea(), which
+    // itself fires from UpdateZone() and from the periodic per-tick area recheck) clears ALL
+    // phases and rebuilds them purely from official area/aura-linked DB2 data - it does not
+    // preserve custom phases added via PhasingHandler::AddPhase(). So the phase this script adds
+    // in OnLogin gets silently wiped the moment the engine recalculates the player's area, even
+    // standing still: diagnostic tracing showed the player's ZONE flickering between 8499 and
+    // 8665 at this exact spawn point every ~1s periodic tick (area itself stays 8665 the whole
+    // time), and Player::UpdateZone() calls UpdateArea() - which runs OnAreaChange() - on every
+    // such flicker regardless of whether the zone/area actually differ from before.
+    // sScriptMgr->OnPlayerUpdateArea() (the PlayerScript::OnUpdateArea hook) is gated by
+    // `oldArea != newArea` in Player::UpdateArea(), so it never re-fires when only the zone
+    // flickers and the area stays the same - that's why hooking OnUpdateArea alone didn't fix it.
+    // sScriptMgr->OnPlayerUpdateZone() (PlayerScript::OnUpdateZone) is NOT gated - Player::
+    // UpdateZone() calls it unconditionally on every invocation - so hook that instead to
+    // guarantee the phase gets re-added on every wipe, flicker or not.
+    // ES: PhasingHandler::OnAreaChange() (llamado sin condicion desde Player::UpdateArea(), que a
+    // su vez se dispara desde UpdateZone() y desde el recalculo periodico de area por tick) limpia
+    // TODAS las fases y las reconstruye solo con datos oficiales de area/aura del DB2 - no
+    // conserva fases custom agregadas via PhasingHandler::AddPhase(). Por eso la fase que este
+    // script agrega en OnLogin se borraba en silencio en cuanto el motor recalculaba el area,
+    // incluso parado quieto: el trace de diagnostico mostro la ZONA del jugador parpadeando entre
+    // 8499 y 8665 en ese punto exacto de spawn en cada tick periodico (~1s) (el area en si se
+    // mantiene en 8665 todo el tiempo), y Player::UpdateZone() llama a UpdateArea() - que corre
+    // OnAreaChange() - en cada uno de esos parpadeos sin importar si zona/area realmente
+    // cambiaron respecto de antes. sScriptMgr->OnPlayerUpdateArea() (el hook OnUpdateArea) esta
+    // condicionado a `oldArea != newArea` en Player::UpdateArea(), asi que nunca se re-dispara
+    // cuando solo parpadea la zona y el area se mantiene igual - por eso enganchar solo
+    // OnUpdateArea no alcanzo. sScriptMgr->OnPlayerUpdateZone() (PlayerScript::OnUpdateZone) NO
+    // esta condicionado - Player::UpdateZone() lo llama sin condicion en cada invocacion - asi que
+    // se engancha eso en su lugar para garantizar que la fase se reaplique en cada borrado, haya o
+    // no parpadeo real.
+    void OnUpdateZone(Player* player, uint32 /*newZone*/, uint32 /*oldZone*/, uint32 /*newArea*/) override
+    {
+        HandlePhase(player);
+    }
+
     void HandlePhase(Player* player)
     {
-        if (player->GetQuestStatus(51443) == QUEST_STATUS_NONE && player->GetQuestStatus(50769) != QUEST_STATUS_REWARDED)
+        // EN: Gate on 50769 alone - entry 135691 (the ongoing War Campaign hub) never offers or
+        // accepts 50769/51443, so 121210 must stay visible for the whole lifetime of 50769
+        // (NONE through COMPLETE), not just before it's accepted. Previously also required
+        // 51443 == NONE, which hid this NPC as soon as "Mission Statement" was picked up in
+        // Orgrimmar (before the scenario even starts) - by the time the player returned here to
+        // turn in 50769 it was already QUEST_STATUS_COMPLETE, not NONE, so the turn-in NPC had
+        // vanished. See TODO.md "Nathanos duplicado en Zuldazar" regression.
+        // ES: Se gatea solo por 50769 - el entry 135691 (el hub de la War Campaign en curso)
+        // nunca ofrece ni recibe 50769/51443, asi que 121210 debe seguir visible durante toda la
+        // vida de 50769 (NONE hasta COMPLETE), no solo antes de aceptarla. Antes tambien exigia
+        // 51443 == NONE, lo que ocultaba este NPC apenas se tomaba "Mission Statement" en
+        // Orgrimmar (antes de arrancar el escenario) - para cuando el jugador volvia aca a
+        // entregar 50769 ya estaba en QUEST_STATUS_COMPLETE, no NONE, asi que el NPC de entrega
+        // habia desaparecido. Ver regresion en TODO.md "Nathanos duplicado en Zuldazar".
+        if (player->GetQuestStatus(50769) != QUEST_STATUS_REWARDED)
             PhasingHandler::AddPhase(player, PHASE_NATHANOS_ZULDAZAR_HARBOR_ARRIVAL, true);
     }
 };

@@ -13,6 +13,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential gcc-13 g++-13 cmake ninja-build git ca-certificates pkg-config \
+    ccache mold \
     libboost-all-dev libmysqlclient-dev libssl-dev libbz2-dev libreadline-dev zlib1g-dev \
     && rm -rf /var/lib/apt/lists/*
 

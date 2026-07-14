@@ -65,9 +65,25 @@ services:
       context: .
       dockerfile: docker/Dockerfile.dev-builder
     profiles: ["tools"]
+    environment:
+      # EN: ccache here is on top of the real /build volume below (which
+      # already gives genuine ninja incrementality) -- it's the fallback
+      # for when that volume gets pruned/reset or you jump between
+      # branches with header changes. Same sloppiness as the production
+      # Dockerfile so PCH (on by default) doesn't cause spurious misses.
+      # ES: ccache aca es un extra sobre el volumen /build real de abajo
+      # (que ya da incrementalidad genuina de ninja) -- es el respaldo
+      # para cuando ese volumen se poda/resetea o saltas entre ramas con
+      # cambios de headers. Misma sloppiness que el Dockerfile de
+      # produccion para que el PCH (activado por defecto) no cause misses
+      # espurios.
+      CCACHE_DIR: /ccache
+      CCACHE_MAXSIZE: 15G
+      CCACHE_SLOPPINESS: pch_defines,time_macros,include_file_mtime,include_file_ctime
     volumes:
       - .:/src
       - dev_build_cache:/build
+      - dev_ccache:/ccache
       # EN: Install output, shared with worldserver/bnetserver ONLY when
       # started via docker-compose.dev.yml (see that file / docker/README.md).
       # ES: Salida de la instalacion, compartida con worldserver/bnetserver
@@ -80,12 +96,30 @@ services:
       - -c
       - |
         set -e
-        cmake -S /src -B /build -G Ninja \
-          -DCMAKE_BUILD_TYPE=RelWithDebInfo \
-          -DTOOLS=0 \
-          -DSCRIPTS=static \
-          -DWITHOUT_GIT=1 \
-          -DCMAKE_INSTALL_PREFIX=/opt/bfacore
+        # EN: only run the full configure on the first invocation (empty
+        # /build volume) or when explicitly forced. Ninja already re-runs
+        # cmake on its own (RERUN_CMAKE rule) whenever CMakeLists.txt
+        # actually changes -- forcing a full `cmake -S -B` on every single
+        # invocation was costing ~110s of pure reconfigure overhead per
+        # iteration, dwarfing the actual incremental compile+link.
+        # ES: solo corre la configuracion completa en la primera invocacion
+        # (volumen /build vacio) o si se fuerza explicitamente. Ninja ya
+        # re-corre cmake solo (regla RERUN_CMAKE) cuando CMakeLists.txt
+        # realmente cambia -- forzar un `cmake -S -B` completo en cada
+        # invocacion costaba ~110s de puro overhead de reconfiguracion por
+        # iteracion, opacando el compile+link incremental real.
+        if [ ! -f /build/CMakeCache.txt ] || [ "${FORCE_RECONFIGURE:-0}" = "1" ]; then
+          cmake -S /src -B /build -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DTOOLS=0 \
+            -DSCRIPTS=static \
+            -DWITHOUT_GIT=1 \
+            -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+            -DCMAKE_EXE_LINKER_FLAGS=-fuse-ld=mold \
+            -DCMAKE_SHARED_LINKER_FLAGS=-fuse-ld=mold \
+            -DCMAKE_INSTALL_PREFIX=/opt/bfacore
+        fi
         cmake --build /build -j"$(nproc)"
         cmake --build /build --target install
 
@@ -158,4 +192,5 @@ volumes:
   bnetserver_etc:
   worldserver_etc:
   dev_build_cache:
+  dev_ccache:
   dev_install:
