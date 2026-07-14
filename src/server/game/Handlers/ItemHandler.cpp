@@ -1242,6 +1242,22 @@ void StoreItemInBanks(Player* player, Item* item)
             break;
 }
 
+// "Clean Up Bags" (SortBags/SortBankBags/SortReagentBankBags) used to sort purely by
+// Item::GetItemLevel(), with no notion of item category - a weapon, a stack of cloth and a
+// potion all interleaved in the same sequence based on nothing but their (possibly
+// level-scaled) item level, producing an order that looked arbitrary to players instead of the
+// "grouped by item type" layout retail's Clean Up Bags produces. Sort primarily by item
+// class/subclass (so gear, consumables, trade goods, etc. group together, matching retail),
+// then by quality and item level as tiebreakers within the same category.
+uint32 GetBagSortKey(Player* player, Item* item)
+{
+    ItemTemplate const* proto = item->GetTemplate();
+    uint32 itemClass = proto->GetClass() & 0xFF;
+    uint32 itemSubClass = proto->GetSubClass() & 0xFF;
+    uint32 quality = proto->GetQuality() & 0xF;
+    uint32 itemLevel = std::min<uint32>(item->GetItemLevel(player), 0xFFF);
+    return (itemClass << 24) | (itemSubClass << 16) | (quality << 12) | itemLevel;
+}
 
 void WorldSession::HandleSortBags(WorldPackets::Item::SortBags& /*sortBags*/)
 {
@@ -1254,26 +1270,33 @@ void WorldSession::HandleSortBags(WorldPackets::Item::SortBags& /*sortBags*/)
             return true;
         });
 
-    std::unordered_map<uint32, uint32> itemsQuality;
+    std::unordered_map<uint32, uint32> itemsSortKey;
     std::multimap<uint32, Item*> items;
 
-    _player->ApplyOnItems(1, [&items, &itemsQuality](Player* player, Item* item, uint8, uint8)
+    _player->ApplyOnItems(1, [&items, &itemsSortKey](Player* player, Item* item, uint8, uint8)
         {
             if (!item)
                 return false;
+
+            // Bag-type items must never be repositioned by the sort/swap pass below - crashed
+            // the server ("pure virtual method called" -> terminate) on repeated Clean Up Bags
+            // presses once a loose bag item (e.g. entry 933 "Large Rucksack") got caught up in
+            // the swap loop. Leave them exactly where they are, same as retail's Clean Up Bags.
+            if (item->IsBag())
+                return true;
 
             if (!sObjectMgr->GetItemTemplate(item->GetEntry()))
                 return true;
 
             items.insert(std::make_pair(item->GetEntry(), item));
-            itemsQuality[item->GetEntry()] = item->GetItemLevel(player);
+            itemsSortKey[item->GetEntry()] = GetBagSortKey(player, item);
 
             return true;
         });
 
     std::multimap<uint32, std::pair<uint32, Item*>> resultMap;
     for (auto const& v : items)
-        resultMap.insert(std::make_pair(itemsQuality[v.first], v));
+        resultMap.insert(std::make_pair(itemsSortKey[v.first], v));
 
     auto itr = std::begin(resultMap);
     _player->ApplyOnItems(1, [&resultMap, &itr](Player* player, Item*, uint8 bagSlot, uint8 itemSlot)
@@ -1299,26 +1322,31 @@ void WorldSession::HandleSortBankBags(WorldPackets::Item::SortBankBags& /*sortBa
             return true;
         });
 
-    std::unordered_map<uint32, uint32> bankItemsQuality;
+    std::unordered_map<uint32, uint32> bankItemsSortKey;
     std::multimap<uint32, Item*> bankItems;
 
-    _player->ApplyOnItems(2, [&bankItems, &bankItemsQuality](Player* player, Item* item, uint8, uint8)
+    _player->ApplyOnItems(2, [&bankItems, &bankItemsSortKey](Player* player, Item* item, uint8, uint8)
         {
             if (!item)
                 return false;
+
+            // See HandleSortBags: bag-type items must never enter the swap pass, crashes on
+            // repeated presses.
+            if (item->IsBag())
+                return true;
 
             if (!sObjectMgr->GetItemTemplate(item->GetEntry()))
                 return true;
 
             bankItems.insert(std::make_pair(item->GetEntry(), item));
-            bankItemsQuality[item->GetEntry()] = item->GetItemLevel(player);
+            bankItemsSortKey[item->GetEntry()] = GetBagSortKey(player, item);
 
             return true;
         });
 
     std::multimap<uint32, std::pair<uint32, Item*>> bankResultMap;
     for (auto const& v : bankItems)
-        bankResultMap.insert(std::make_pair(bankItemsQuality[v.first], v));
+        bankResultMap.insert(std::make_pair(bankItemsSortKey[v.first], v));
 
     auto itr = std::begin(bankResultMap);
     _player->ApplyOnItems(2, [&bankResultMap, &itr](Player* player, Item*, uint8 bagSlot, uint8 itemSlot)
@@ -1344,23 +1372,28 @@ void WorldSession::HandleSortReagentBankBags(WorldPackets::Item::SortReagentBank
             return true;
         });
 
-    std::unordered_map<uint32, uint32> bankItemsQuality;
+    std::unordered_map<uint32, uint32> bankItemsSortKey;
     std::multimap<uint32, Item*> bankItems;
 
-    _player->ApplyOnItems(3, [&bankItems, &bankItemsQuality](Player* player, Item* item, uint8, uint8)
+    _player->ApplyOnItems(3, [&bankItems, &bankItemsSortKey](Player* player, Item* item, uint8, uint8)
         {
+            // See HandleSortBags: bag-type items must never enter the swap pass, crashes on
+            // repeated presses.
+            if (item->IsBag())
+                return true;
+
             if (!sObjectMgr->GetItemTemplate(item->GetEntry()))
                 return true;
 
             bankItems.insert(std::make_pair(item->GetEntry(), item));
-            bankItemsQuality[item->GetEntry()] = item->GetItemLevel(player);
+            bankItemsSortKey[item->GetEntry()] = GetBagSortKey(player, item);
 
             return true;
         });
 
     std::multimap<uint32, std::pair<uint32, Item*>> bankResultMap;
     for (auto const& v : bankItems)
-        bankResultMap.insert(std::make_pair(bankItemsQuality[v.first], v));
+        bankResultMap.insert(std::make_pair(bankItemsSortKey[v.first], v));
 
     auto itr = std::begin(bankResultMap);
     _player->ApplyOnItems(3, [&bankResultMap, &itr](Player* player, Item*, uint8 bagSlot, uint8 itemSlot)
